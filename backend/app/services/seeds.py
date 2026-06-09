@@ -65,9 +65,9 @@ SEED_INSTITUTIONS = [
         "institution_type": "医院",
         "region": "浙江",
         "official_url": "https://www.z2hospital.com/",
-        "listing_url": "https://www.z2hospital.com/",
-        "crawl_strategy": "generic",
-        "enabled": False,
+        "listing_url": "https://www.z2hospital.com/channels/611.html",
+        "crawl_strategy": "z2hospital",
+        "enabled": True,
     },
     {
         "id": 8,
@@ -75,9 +75,9 @@ SEED_INSTITUTIONS = [
         "institution_type": "医院",
         "region": "湖北",
         "official_url": "https://www.tjh.com.cn/",
-        "listing_url": "https://www.tjh.com.cn/",
+        "listing_url": "https://hr.tjhonline.com.cn/zp.html",
         "crawl_strategy": "generic",
-        "enabled": False,
+        "enabled": False,  # SPA 渲染，需 headless browser
     },
     {
         "id": 9,
@@ -105,9 +105,9 @@ SEED_INSTITUTIONS = [
         "institution_type": "高校",
         "region": "北京",
         "official_url": "https://www.bjmu.edu.cn/",
-        "listing_url": "https://www.bjmu.edu.cn/",
-        "crawl_strategy": "generic",
-        "enabled": False,
+        "listing_url": "https://rsc.bjmu.edu.cn/rczp/js/index.htm",
+        "crawl_strategy": "bjmu",
+        "enabled": True,
     },
     {
         "id": 12,
@@ -115,9 +115,9 @@ SEED_INSTITUTIONS = [
         "institution_type": "高校",
         "region": "上海",
         "official_url": "https://www.shsmu.edu.cn/",
-        "listing_url": "https://www.shsmu.edu.cn/",
+        "listing_url": "https://join.shsmu.edu.cn/",
         "crawl_strategy": "generic",
-        "enabled": False,
+        "enabled": False,  # 需要进一步分析页面结构
     },
     {
         "id": 13,
@@ -127,7 +127,7 @@ SEED_INSTITUTIONS = [
         "official_url": "https://www.cmm.zju.edu.cn/",
         "listing_url": "https://www.cmm.zju.edu.cn/",
         "crawl_strategy": "generic",
-        "enabled": False,
+        "enabled": False,  # 站点连接超时
     },
     {
         "id": 14,
@@ -145,9 +145,9 @@ SEED_INSTITUTIONS = [
         "institution_type": "高校",
         "region": "广东",
         "official_url": "https://www.gzhmu.edu.cn/",
-        "listing_url": "https://www.gzhmu.edu.cn/",
+        "listing_url": "https://zpxt.gzhmu.edu.cn/",
         "crawl_strategy": "generic",
-        "enabled": False,
+        "enabled": False,  # 招聘系统 404
     },
     {
         "id": 16,
@@ -155,9 +155,9 @@ SEED_INSTITUTIONS = [
         "institution_type": "研究机构",
         "region": "上海",
         "official_url": "https://www.simm.ac.cn/",
-        "listing_url": "https://www.simm.ac.cn/",
+        "listing_url": "https://simm.cas.cn/web/rcdw/rczp/",
         "crawl_strategy": "generic",
-        "enabled": False,
+        "enabled": False,  # 列表页可达但内容需进一步适配
     },
     {
         "id": 17,
@@ -185,9 +185,9 @@ SEED_INSTITUTIONS = [
         "institution_type": "研究机构",
         "region": "北京",
         "official_url": "https://www.chinacdc.cn/",
-        "listing_url": "https://www.chinacdc.cn/",
-        "crawl_strategy": "generic",
-        "enabled": False,
+        "listing_url": "https://www.chinacdc.cn/rcjs/rczp/",
+        "crawl_strategy": "chinacdc",
+        "enabled": True,
     },
     {
         "id": 20,
@@ -197,7 +197,7 @@ SEED_INSTITUTIONS = [
         "official_url": "https://www.nrifp.org.cn/",
         "listing_url": "https://www.nrifp.org.cn/",
         "crawl_strategy": "generic",
-        "enabled": False,
+        "enabled": False,  # 站点连接超时
     },
     {
         "id": 21,
@@ -227,7 +227,7 @@ SEED_INSTITUTIONS = [
         "official_url": "https://www.xwhosp.com.cn/",
         "listing_url": "https://www.xwhosp.com.cn/",
         "crawl_strategy": "generic",
-        "enabled": False,
+        "enabled": False,  # 招聘页需要登录
     },
     {
         "id": 24,
@@ -257,7 +257,7 @@ SEED_INSTITUTIONS = [
         "official_url": "https://www.eye.ac.cn/",
         "listing_url": "https://www.eye.ac.cn/",
         "crawl_strategy": "generic",
-        "enabled": False,
+        "enabled": False,  # 站点连接超时
     },
     {
         "id": 27,
@@ -265,9 +265,9 @@ SEED_INSTITUTIONS = [
         "institution_type": "高校",
         "region": "黑龙江",
         "official_url": "https://www.hrbmu.edu.cn/",
-        "listing_url": "https://www.hrbmu.edu.cn/",
-        "crawl_strategy": "generic",
-        "enabled": False,
+        "listing_url": "http://hr.hrbmu.edu.cn/",
+        "crawl_strategy": "hrbmu",
+        "enabled": True,
     },
     {
         "id": 28,
@@ -275,9 +275,9 @@ SEED_INSTITUTIONS = [
         "institution_type": "高校",
         "region": "江苏",
         "official_url": "https://www.njmu.edu.cn/",
-        "listing_url": "https://www.njmu.edu.cn/",
-        "crawl_strategy": "generic",
-        "enabled": False,
+        "listing_url": "https://rsc.njmu.edu.cn/10978/list.htm",
+        "crawl_strategy": "njmu",
+        "enabled": True,
     },
     {
         "id": 29,
@@ -295,8 +295,8 @@ SEED_INSTITUTIONS = [
         "institution_type": "医院",
         "region": "上海",
         "official_url": "https://www.shaphc.org/",
-        "listing_url": "https://www.shaphc.org/",
+        "listing_url": "https://www.shaphc.org/channel/58.html",
         "crawl_strategy": "generic",
-        "enabled": False,
+        "enabled": False,  # 招聘频道混合采购公告，需专用解析器
     },
 ]

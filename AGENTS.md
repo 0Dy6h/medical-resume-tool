@@ -37,10 +37,20 @@ pnpm dev
 - `backend/app/services/seeds.py` - 30 institution seed records.
 - `backend/app/services/crawler.py` - fixture and generic crawler/parser, adapter dispatch.
 - `backend/app/services/adapters/nfyy.py` - 南方医院 announcement parser (real site adapter).
+- `backend/app/services/adapters/z2hospital.py` - 浙大二院 listing+article parser.
+- `backend/app/services/adapters/chinacdc.py` - 中疾控 listing+department notice parser.
+- `backend/app/services/adapters/njmu.py` - 南京医科大学 listing+announcement parser.
+- `backend/app/services/adapters/hrbmu.py` - 哈尔滨医科大学 listing+table parser.
+- `backend/app/services/adapters/bjmu.py` - 北京大学医学部 listing+announcement parser.
 - `backend/app/services/classifier.py` - rule-based category and tag extraction.
 - `backend/app/services/resume.py` - profile-to-job matching and truthful resume draft generation.
 - `backend/app/services/exporter.py` - DOCX/PDF export.
 - `backend/fixtures/nfyy/` - saved HTML fixtures for offline adapter testing.
+- `backend/fixtures/z2hospital/` - 浙大二院 fixture HTML.
+- `backend/fixtures/chinacdc/` - 中疾控 fixture HTML.
+- `backend/fixtures/njmu/` - 南京医科大学 fixture HTML.
+- `backend/fixtures/hrbmu/` - 哈尔滨医科大学 fixture HTML.
+- `backend/fixtures/bjmu/` - 北京大学医学部 fixture HTML.
 - `frontend/src/App.tsx` - frontend shell and navigation.
 - `frontend/src/pages/` - workbench pages.
 - `docs/handoffs/` - session continuation notes.

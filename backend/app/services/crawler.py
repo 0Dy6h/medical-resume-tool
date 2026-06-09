@@ -176,6 +176,21 @@ def _resolve_adapter(strategy: str):
     if strategy == "nfyy":
         from app.services.adapters.nfyy import crawl_nfyy
         return crawl_nfyy
+    if strategy == "z2hospital":
+        from app.services.adapters.z2hospital import crawl_z2hospital
+        return crawl_z2hospital
+    if strategy == "chinacdc":
+        from app.services.adapters.chinacdc import crawl_chinacdc
+        return crawl_chinacdc
+    if strategy == "njmu":
+        from app.services.adapters.njmu import crawl_njmu
+        return crawl_njmu
+    if strategy == "hrbmu":
+        from app.services.adapters.hrbmu import crawl_hrbmu
+        return crawl_hrbmu
+    if strategy == "bjmu":
+        from app.services.adapters.bjmu import crawl_bjmu
+        return crawl_bjmu
     return None
 
 
