@@ -1,0 +1,15 @@
+.venv/
+backend/.venv/
+frontend/node_modules/
+frontend/dist/
+data/*.db
+data/*.db-*
+backend/data/*.db
+backend/data/*.db-*
+__pycache__/
+.pytest_cache/
+.env
+.DS_Store
+logs/
+.tmp_probe/
+*.tsbuildinfo

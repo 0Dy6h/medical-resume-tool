@@ -1,0 +1,2 @@
+"""Medical job intelligence backend."""
+
