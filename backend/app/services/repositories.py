@@ -60,8 +60,15 @@ def complete_crawl_run(
     failure_count: int,
     errors: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    status = "completed" if failure_count == 0 else "completed_with_errors"
     with connect(engine) as conn:
+        row = conn.execute("SELECT institution_ids FROM crawl_runs WHERE id = ?", (run_id,)).fetchone()
+        institution_count = len(from_json(row["institution_ids"], [])) if row else 0
+        if failure_count == 0:
+            status = "completed"
+        elif failure_count >= institution_count:
+            status = "failed"
+        else:
+            status = "partial"
         conn.execute(
             """
             UPDATE crawl_runs
@@ -81,7 +88,9 @@ def get_crawl_run(engine: DatabaseEngine, run_id: int) -> dict[str, Any]:
         raise KeyError(run_id)
     item = dict(row)
     item["institution_ids"] = from_json(item["institution_ids"], [])
-    item["error_summary"] = from_json(item["error_summary"], [])
+    errors = from_json(item["error_summary"], [])
+    item["error_summary"] = errors
+    item["errors"] = errors
     return item
 
 
@@ -111,6 +120,17 @@ def upsert_job(engine: DatabaseEngine, institution: dict[str, Any], parsed: Any)
         "confidence": parsed.confidence,
     }
     with connect(engine) as conn:
+        duplicate_by_hash = conn.execute(
+            "SELECT id FROM jobs WHERE source_text_hash = ?",
+            (parsed.source_text_hash,),
+        ).fetchone()
+        if duplicate_by_hash:
+            conn.execute(
+                "UPDATE jobs SET fetched_at = ? WHERE id = ?",
+                (parsed.fetched_at, duplicate_by_hash["id"]),
+            )
+            conn.commit()
+            return False
         exists = conn.execute("SELECT id FROM jobs WHERE source_url = ?", (parsed.source_url,)).fetchone()
         if exists:
             conn.execute(

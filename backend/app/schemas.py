@@ -32,6 +32,7 @@ class CrawlRunOut(BaseModel):
     success_count: int
     failure_count: int
     error_summary: list[dict[str, Any]]
+    errors: list[dict[str, Any]]
 
 
 class RawSnapshot(BaseModel):

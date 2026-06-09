@@ -1,10 +1,13 @@
 import io
 from pathlib import Path
 
+import httpx
 from fastapi.testclient import TestClient
 
+import app.main as main_module
 from app.main import create_app
-from app.services.database import init_db, reset_db
+from app.services.crawler import ParsedJob
+from app.services.database import connect, init_db, reset_db
 
 
 def make_client(tmp_path: Path) -> TestClient:
@@ -53,6 +56,149 @@ def test_crawl_fixture_creates_tagged_jobs_without_duplicates(tmp_path):
     assert after["total"] == payload["total"] or after["total"] >= payload["total"]
     urls = [item["source_url"] for item in after["items"]]
     assert len(urls) == len(set(urls))
+
+
+def test_crawl_retries_timeout_then_persists_jobs(tmp_path, monkeypatch):
+    monkeypatch.setenv("CRAWL_DELAY_SECONDS", "0")
+    monkeypatch.setenv("CRAWL_RETRY_BASE_SECONDS", "0")
+    client = make_client(tmp_path)
+    with connect(client.app.state.engine) as conn:
+        conn.execute(
+            """
+            UPDATE institutions
+            SET listing_url = ?, crawl_strategy = ?, enabled = 1
+            WHERE id = 1
+            """,
+            ("https://example.test/recruit", "generic"),
+        )
+        conn.commit()
+
+    attempts = 0
+
+    async def flaky_get(self, url):  # noqa: ANN001
+        nonlocal attempts
+        attempts += 1
+        request = httpx.Request("GET", url)
+        if attempts == 1:
+            raise httpx.TimeoutException("timed out", request=request)
+        return httpx.Response(
+            200,
+            text="<html><body><a href='/job/1'>护理岗位招聘</a></body></html>",
+            request=request,
+        )
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", flaky_get)
+
+    run = client.post("/api/crawl-runs", json={"institution_ids": [1]})
+
+    assert run.status_code == 201
+    payload = run.json()
+    assert payload["status"] == "completed"
+    assert payload["failure_count"] == 0
+    assert payload["success_count"] == 1
+    assert attempts == 2
+    jobs = client.get("/api/jobs").json()
+    assert jobs["total"] == 1
+
+
+def test_crawl_run_reports_partial_status_and_errors(tmp_path, monkeypatch):
+    monkeypatch.setenv("CRAWL_DELAY_SECONDS", "0")
+    monkeypatch.setenv("CRAWL_RETRY_BASE_SECONDS", "0")
+    client = make_client(tmp_path)
+    with connect(client.app.state.engine) as conn:
+        conn.execute(
+            """
+            UPDATE institutions
+            SET listing_url = ?, crawl_strategy = ?, enabled = 1
+            WHERE id = 2
+            """,
+            ("https://example.test/unreachable", "generic"),
+        )
+        conn.commit()
+
+    async def failing_get(self, url):  # noqa: ANN001
+        request = httpx.Request("GET", url)
+        raise httpx.ConnectError("network unavailable", request=request)
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", failing_get)
+
+    run = client.post("/api/crawl-runs", json={"institution_ids": [1, 2]})
+
+    assert run.status_code == 201
+    payload = run.json()
+    assert payload["status"] == "partial"
+    assert payload["failure_count"] == 1
+    assert payload["success_count"] >= 3
+    assert payload["errors"] == payload["error_summary"]
+    assert payload["errors"][0]["institution_id"] == 2
+
+
+def test_crawl_deduplicates_by_source_text_hash_and_refreshes_fetched_at(tmp_path, monkeypatch):
+    monkeypatch.setenv("CRAWL_DELAY_SECONDS", "0")
+    client = make_client(tmp_path)
+    calls = 0
+
+    def make_job(source_url: str, fetched_at: str) -> ParsedJob:
+        return ParsedJob(
+            title="护理岗位招聘",
+            department="护理部",
+            location="广东",
+            education="本科",
+            profession="护理学",
+            job_category="护理",
+            responsibilities="承担病区护理。",
+            requirements="护理学本科。",
+            posted_at=None,
+            deadline=None,
+            source_url=source_url,
+            source_text_hash="same-source-text-hash",
+            raw_text="护理岗位招聘\n护理学本科。",
+            tags=["护理"],
+            extraction_evidence={},
+            fetched_at=fetched_at,
+            parser_name="test-parser-v1",
+            confidence=0.9,
+        )
+
+    async def crawl_same_text_different_url(institution):  # noqa: ANN001
+        nonlocal calls
+        calls += 1
+        return [
+            make_job(
+                source_url=f"https://example.test/jobs/{calls}",
+                fetched_at=f"2026-06-09T00:00:0{calls}+00:00",
+            )
+        ]
+
+    monkeypatch.setattr(main_module, "crawl_institution", crawl_same_text_different_url)
+
+    first_run = client.post("/api/crawl-runs", json={"institution_ids": [1]})
+    second_run = client.post("/api/crawl-runs", json={"institution_ids": [1]})
+
+    assert first_run.status_code == 201
+    assert second_run.status_code == 201
+    jobs = client.get("/api/jobs").json()
+    assert jobs["total"] == 1
+    assert jobs["items"][0]["source_url"] == "https://example.test/jobs/1"
+    assert jobs["items"][0]["source_text_hash"] == "same-source-text-hash"
+    assert jobs["items"][0]["fetched_at"] == "2026-06-09T00:00:02+00:00"
+
+
+def test_crawl_defaults_to_one_second_delay_between_institutions(tmp_path, monkeypatch):
+    monkeypatch.delenv("CRAWL_DELAY_SECONDS", raising=False)
+    client = make_client(tmp_path)
+    sleep_calls = []
+
+    async def record_sleep(seconds):  # noqa: ANN001
+        sleep_calls.append(seconds)
+
+    monkeypatch.setattr(main_module.asyncio, "sleep", record_sleep)
+
+    run = client.post("/api/crawl-runs", json={"institution_ids": [1, 2]})
+
+    assert run.status_code == 201
+    assert run.json()["status"] == "completed"
+    assert sleep_calls == [1.0]
 
 
 def test_job_detail_and_analytics_summary(tmp_path):

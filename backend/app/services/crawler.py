@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import os
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -162,6 +164,19 @@ def parse_job_from_text(
 
 
 async def crawl_institution(institution: dict[str, Any]) -> list[ParsedJob]:
+    retries = 2
+    base_delay = float(os.getenv("CRAWL_RETRY_BASE_SECONDS", "0.5"))
+    for attempt in range(retries + 1):
+        try:
+            return await _crawl_institution_once(institution)
+        except httpx.TimeoutException:
+            if attempt >= retries:
+                raise
+            await asyncio.sleep(base_delay * (2**attempt))
+    return []
+
+
+async def _crawl_institution_once(institution: dict[str, Any]) -> list[ParsedJob]:
     if institution["listing_url"].startswith("fixture://"):
         return crawl_fixture(institution)
     strategy = institution.get("crawl_strategy", "generic")

@@ -78,21 +78,21 @@ def create_app(database_url: str | None = None) -> FastAPI:
         success_count = 0
         failure_count = 0
         errors = []
-        delay = float(os.getenv("CRAWL_DELAY_SECONDS", "0"))
-        for institution in institutions_to_crawl:
+        delay = float(os.getenv("CRAWL_DELAY_SECONDS", "1"))
+        for index, institution in enumerate(institutions_to_crawl):
             try:
                 parsed_jobs = await crawl_institution(institution)
                 for parsed in parsed_jobs:
                     upsert_job(engine, institution, parsed)
                     success_count += 1
                 mark_institution(engine, institution["id"], "success")
-                if delay:
-                    await asyncio.sleep(delay)
             except Exception as exc:  # pragma: no cover - exact network failures vary.
                 failure_count += 1
                 message = str(exc)
                 errors.append({"institution_id": institution["id"], "institution": institution["name"], "error": message})
                 mark_institution(engine, institution["id"], "failed", message)
+            if delay and index < len(institutions_to_crawl) - 1:
+                await asyncio.sleep(delay)
         return complete_crawl_run(
             engine,
             run_id,
