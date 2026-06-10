@@ -71,6 +71,7 @@ def create_app(database_url: str | None = None) -> FastAPI:
 
     @app.post("/api/crawl-runs", response_model=CrawlRunOut, status_code=201)
     async def start_crawl(payload: CrawlRunCreate, engine: Annotated[DatabaseEngine, Depends(get_engine)]) -> dict:
+        from app.config import config
         institutions_to_crawl = get_institutions_by_ids(engine, payload.institution_ids)
         if not institutions_to_crawl:
             raise HTTPException(status_code=404, detail="没有找到可抓取的机构")
@@ -78,7 +79,7 @@ def create_app(database_url: str | None = None) -> FastAPI:
         success_count = 0
         failure_count = 0
         errors = []
-        delay = float(os.getenv("CRAWL_DELAY_SECONDS", "1"))
+        delay = config.crawl_delay_seconds
         for index, institution in enumerate(institutions_to_crawl):
             try:
                 parsed_jobs = await crawl_institution(institution)
@@ -118,6 +119,8 @@ def create_app(database_url: str | None = None) -> FastAPI:
         education: str | None = None,
         institution_type: str | None = None,
         tag: str | None = None,
+        limit: Annotated[int, Query(ge=1, le=500)] = 100,
+        offset: Annotated[int, Query(ge=0)] = 0,
     ) -> dict:
         return list_jobs(
             engine,
@@ -129,6 +132,8 @@ def create_app(database_url: str | None = None) -> FastAPI:
                 "education": education,
                 "institution_type": institution_type,
                 "tag": tag,
+                "limit": limit,
+                "offset": offset,
             },
         )
 

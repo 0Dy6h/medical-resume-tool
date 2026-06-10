@@ -164,8 +164,9 @@ def parse_job_from_text(
 
 
 async def crawl_institution(institution: dict[str, Any]) -> list[ParsedJob]:
-    retries = 2
-    base_delay = float(os.getenv("CRAWL_RETRY_BASE_SECONDS", "0.5"))
+    from app.config import config
+    retries = config.crawl_retries
+    base_delay = config.crawl_retry_base_seconds
     for attempt in range(retries + 1):
         try:
             return await _crawl_institution_once(institution)

@@ -70,6 +70,8 @@ export type JobDetail = Job & {
 export type JobList = {
   total: number;
   items: Job[];
+  limit?: number;
+  offset?: number;
 };
 
 export type CountItem = {

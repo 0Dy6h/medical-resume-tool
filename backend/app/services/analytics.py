@@ -4,25 +4,68 @@ from collections import Counter, defaultdict
 from html import escape
 from typing import Any
 
-from app.services.database import DatabaseEngine
-from app.services.repositories import list_jobs, save_report
+from app.config import config
+from app.services.database import DatabaseEngine, connect, from_json
+from app.services.repositories import build_jobs_where_clause, save_report
 
 
-LOW_CONFIDENCE_THRESHOLD = 0.65
+LOW_CONFIDENCE_THRESHOLD = config.low_confidence_threshold
 
 
 def _counter_payload(counter: Counter) -> list[dict[str, Any]]:
     return [{"name": name, "count": count} for name, count in counter.most_common()]
 
 
+def _group_count(conn: Any, column: str, where: str, params: list[Any]) -> Counter:
+    """Run GROUP BY column → Counter, treating NULL/empty as the given fallback caller decides."""
+    rows = conn.execute(
+        f"SELECT {column} AS name, COUNT(*) AS count FROM jobs {where} GROUP BY {column}",
+        params,
+    ).fetchall()
+    return Counter({row["name"]: row["count"] for row in rows})
+
+
 def analytics_summary(engine: DatabaseEngine, filters: dict[str, Any] | None = None) -> dict[str, Any]:
-    jobs = list_jobs(engine, filters or {})["items"]
-    category = Counter(job["job_category"] for job in jobs)
-    education = Counter(job["education"] or "未注明" for job in jobs)
-    institution_types = Counter(job["institution_type"] for job in jobs)
-    regions = Counter(job["region"] for job in jobs)
-    tags = Counter(tag for job in jobs for tag in job["tags"] if tag not in {job["region"], job["institution_type"], job["job_category"]})
+    where, params = build_jobs_where_clause(filters or {})
+    with connect(engine) as conn:
+        total_jobs = conn.execute(f"SELECT COUNT(*) AS count FROM jobs {where}", params).fetchone()["count"]
+        category = _group_count(conn, "job_category", where, params)
+        education_raw = _group_count(conn, "education", where, params)
+        institution_types = _group_count(conn, "institution_type", where, params)
+        regions = _group_count(conn, "region", where, params)
+        totals_row = conn.execute(
+            f"""
+            SELECT COUNT(DISTINCT institution_id) AS institutions,
+                   COUNT(DISTINCT region) AS regions
+            FROM jobs {where}
+            """,
+            params,
+        ).fetchone()
+        focus_rows = conn.execute(
+            f"""
+            SELECT institution_name, job_category, COUNT(*) AS count
+            FROM jobs {where}
+            GROUP BY institution_name, job_category
+            """,
+            params,
+        ).fetchall()
+        # Pull only the small JSON/scalar columns we still need to aggregate in Python.
+        tag_evidence_rows = conn.execute(
+            f"""
+            SELECT region, institution_type, job_category, parser_name, confidence,
+                   tags, extraction_evidence
+            FROM jobs {where}
+            """,
+            params,
+        ).fetchall()
+
+    education = Counter({(name or "未注明"): count for name, count in education_raw.items()})
+
     focus: dict[str, Counter] = defaultdict(Counter)
+    for row in focus_rows:
+        focus[row["institution_name"]][row["job_category"]] = row["count"]
+
+    tags: Counter = Counter()
     parser_stats: dict[str, dict[str, Any]] = defaultdict(
         lambda: {
             "jobs": 0,
@@ -32,24 +75,33 @@ def analytics_summary(engine: DatabaseEngine, filters: dict[str, Any] | None = N
             "confidence_sum": 0.0,
         }
     )
-    for job in jobs:
-        focus[job["institution_name"]][job["job_category"]] += 1
-        parser_name = job["parser_name"] or "unknown"
+    for row in tag_evidence_rows:
+        exclude = {row["region"], row["institution_type"], row["job_category"]}
+        for tag in from_json(row["tags"], []):
+            if tag not in exclude:
+                tags[tag] += 1
+        parser_name = row["parser_name"] or "unknown"
         stats = parser_stats[parser_name]
-        confidence = float(job["confidence"] or 0)
+        confidence = float(row["confidence"] or 0)
+        evidence = from_json(row["extraction_evidence"], {}) or {}
         stats["jobs"] += 1
         stats["confidence_sum"] += confidence
         if confidence < LOW_CONFIDENCE_THRESHOLD:
             stats["low_confidence_jobs"] += 1
-        if _is_attachment_sourced(job):
+        if evidence.get("attachment_url"):
             stats["attachment_sourced_jobs"] += 1
-        stats["failed_attachment_events"] += _failed_attachment_events(job)
+        attachments = evidence.get("attachments")
+        if isinstance(attachments, list):
+            stats["failed_attachment_events"] += sum(
+                1 for item in attachments if isinstance(item, dict) and item.get("status") == "failed"
+            )
+
     parser_quality = _parser_quality_payload(parser_stats)
     return {
         "totals": {
-            "jobs": len(jobs),
-            "institutions": len({job["institution_id"] for job in jobs}),
-            "regions": len({job["region"] for job in jobs}),
+            "jobs": total_jobs,
+            "institutions": totals_row["institutions"] if totals_row else 0,
+            "regions": totals_row["regions"] if totals_row else 0,
             "parsers": len(parser_stats),
             "low_confidence_jobs": sum(item["low_confidence_jobs"] for item in parser_stats.values()),
             "attachment_sourced_jobs": sum(item["attachment_sourced_jobs"] for item in parser_stats.values()),
@@ -104,23 +156,6 @@ def _review_status(stats: dict[str, Any], average_confidence: float) -> str:
     if average_confidence < 0.8:
         return "watch"
     return "stable"
-
-
-def _is_attachment_sourced(job: dict[str, Any]) -> bool:
-    evidence = job.get("extraction_evidence") or {}
-    return bool(evidence.get("attachment_url"))
-
-
-def _failed_attachment_events(job: dict[str, Any]) -> int:
-    evidence = job.get("extraction_evidence") or {}
-    attachments = evidence.get("attachments")
-    if not isinstance(attachments, list):
-        return 0
-    return sum(
-        1
-        for attachment in attachments
-        if isinstance(attachment, dict) and attachment.get("status") == "failed"
-    )
 
 
 def generate_report(engine: DatabaseEngine, title: str, filters: dict[str, Any]) -> dict[str, Any]:

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from io import BytesIO
 from typing import Any
 from urllib.parse import urljoin, urlparse
@@ -117,8 +117,21 @@ def build_jobs_from_xlsx_attachment(
         )
         if parser_warning:
             evidence["parser_warning"] = parser_warning
-        jobs.append(_replace_evidence(job, evidence))
+        jobs.append(replace(job, extraction_evidence=evidence))
     return jobs
+
+
+def status_for_attachment(
+    attachment: dict[str, str],
+    attachment_bytes_by_url: dict[str, bytes] | None,
+    attachment_errors_by_url: dict[str, str] | None,
+) -> dict[str, str]:
+    """Map a discovered attachment to its fetch outcome (parsed / failed / discovered)."""
+    if attachment["url"] in (attachment_bytes_by_url or {}):
+        return attachment_status(attachment, "parsed")
+    if attachment["url"] in (attachment_errors_by_url or {}):
+        return attachment_status(attachment, "failed", (attachment_errors_by_url or {})[attachment["url"]])
+    return attachment_status(attachment, "discovered")
 
 
 def attachment_status(attachment: dict[str, str], status: str, error: str | None = None) -> dict[str, str]:
@@ -185,26 +198,3 @@ def _fallback_title(values: dict[str, str], attachment_name: str) -> str:
             return value
     first_value = next(iter(values.values()), "")
     return first_value or attachment_name.replace(".xlsx", "").replace(".xls", "")
-
-
-def _replace_evidence(job: ParsedJob, evidence: dict[str, Any]) -> ParsedJob:
-    return ParsedJob(
-        title=job.title,
-        department=job.department,
-        location=job.location,
-        education=job.education,
-        profession=job.profession,
-        job_category=job.job_category,
-        responsibilities=job.responsibilities,
-        requirements=job.requirements,
-        posted_at=job.posted_at,
-        deadline=job.deadline,
-        source_url=job.source_url,
-        source_text_hash=job.source_text_hash,
-        raw_text=job.raw_text,
-        tags=job.tags,
-        extraction_evidence=evidence,
-        fetched_at=job.fetched_at,
-        parser_name=job.parser_name,
-        confidence=job.confidence,
-    )

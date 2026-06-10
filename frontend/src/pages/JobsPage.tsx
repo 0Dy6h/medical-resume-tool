@@ -5,19 +5,27 @@ import { formatDate } from "../lib/format";
 import type { Job, JobDetail } from "../types";
 
 export function JobsPage() {
+  const PAGE_SIZE = 50;
   const [keyword, setKeyword] = useState("");
   const [category, setCategory] = useState("");
   const [jobs, setJobs] = useState<Job[]>([]);
   const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(0);
   const [detail, setDetail] = useState<JobDetail | null>(null);
   const [loading, setLoading] = useState(false);
 
-  async function refresh() {
+  async function refresh(targetPage = page) {
     setLoading(true);
     try {
-      const payload = await api.jobs({ keyword, job_category: category });
+      const payload = await api.jobs({
+        keyword,
+        job_category: category,
+        limit: PAGE_SIZE,
+        offset: targetPage * PAGE_SIZE,
+      });
       setJobs(payload.items);
       setTotal(payload.total);
+      setPage(targetPage);
       if (payload.items.length && !detail) {
         setDetail(await api.job(payload.items[0].id));
       }
@@ -26,13 +34,19 @@ export function JobsPage() {
     }
   }
 
+  function search() {
+    void refresh(0);
+  }
+
   async function selectJob(job: Job) {
     setDetail(await api.job(job.id));
   }
 
   useEffect(() => {
-    void refresh();
+    void refresh(0);
   }, []);
+
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   return (
     <div className="split-page">
@@ -42,14 +56,14 @@ export function JobsPage() {
             <h1>岗位库</h1>
             <p className="subtle">{total} 条样本</p>
           </div>
-          <button className="icon-button" onClick={refresh} disabled={loading} title="刷新">
+          <button className="icon-button" onClick={() => void refresh()} disabled={loading} title="刷新">
             <RefreshCcw size={18} />
           </button>
         </div>
         <div className="filter-row">
           <label className="search-box">
             <Search size={17} />
-            <input value={keyword} onChange={(event) => setKeyword(event.target.value)} onKeyDown={(event) => event.key === "Enter" && void refresh()} placeholder="岗位、机构、能力" />
+            <input value={keyword} onChange={(event) => setKeyword(event.target.value)} onKeyDown={(event) => event.key === "Enter" && search()} placeholder="岗位、机构、能力" />
           </label>
           <select value={category} onChange={(event) => setCategory(event.target.value)}>
             <option value="">全部大类</option>
@@ -57,7 +71,7 @@ export function JobsPage() {
               <option key={item} value={item}>{item}</option>
             ))}
           </select>
-          <button className="icon-text-button" onClick={refresh}>
+          <button className="icon-text-button" onClick={search}>
             <Search size={17} />
             查询
           </button>
@@ -88,6 +102,27 @@ export function JobsPage() {
             ))}
           </tbody>
         </table>
+        {totalPages > 1 && (
+          <div className="pagination-row">
+            <button
+              className="icon-text-button"
+              onClick={() => void refresh(page - 1)}
+              disabled={loading || page <= 0}
+            >
+              上一页
+            </button>
+            <span className="subtle">
+              第 {page + 1} / {totalPages} 页
+            </span>
+            <button
+              className="icon-text-button"
+              onClick={() => void refresh(page + 1)}
+              disabled={loading || page >= totalPages - 1}
+            >
+              下一页
+            </button>
+          </div>
+        )}
       </section>
 
       <aside className="detail-panel">

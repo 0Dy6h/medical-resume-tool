@@ -69,6 +69,8 @@ class JobOut(BaseModel):
 class JobListOut(BaseModel):
     total: int
     items: list[JobOut]
+    limit: int = 100
+    offset: int = 0
 
 
 class JobDetailOut(JobOut):

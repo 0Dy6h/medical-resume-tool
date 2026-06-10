@@ -9,6 +9,7 @@ export function ResumePage() {
   const [draft, setDraft] = useState<ResumeDraft | null>(null);
   const [loading, setLoading] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   async function refreshJobs() {
     const payload = await api.jobs();
@@ -40,9 +41,14 @@ export function ResumePage() {
 
   async function exportDraft(format: "docx" | "pdf") {
     if (!draft) return;
-    await saveDraft();
-    const blob = await api.exportResume(draft.id, format);
-    downloadBlob(blob, `resume-${draft.id}.${format}`);
+    setExporting(true);
+    try {
+      await saveDraft();
+      const blob = await api.exportResume(draft.id, format);
+      downloadBlob(blob, `resume-${draft.id}.${format}`);
+    } finally {
+      setExporting(false);
+    }
   }
 
   function updateSectionTitle(index: number, value: string) {
@@ -108,13 +114,13 @@ export function ResumePage() {
                   <Save size={17} />
                   {saved ? "已保存" : "保存"}
                 </button>
-                <button className="icon-text-button" onClick={() => void exportDraft("docx")}>
+                <button className="icon-text-button" onClick={() => void exportDraft("docx")} disabled={exporting}>
                   <Download size={17} />
-                  DOCX
+                  {exporting ? "导出中..." : "DOCX"}
                 </button>
-                <button className="icon-text-button" onClick={() => void exportDraft("pdf")}>
+                <button className="icon-text-button" onClick={() => void exportDraft("pdf")} disabled={exporting}>
                   <FileDown size={17} />
-                  PDF
+                  {exporting ? "导出中..." : "PDF"}
                 </button>
               </div>
             </div>

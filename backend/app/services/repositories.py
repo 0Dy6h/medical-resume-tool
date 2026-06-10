@@ -187,8 +187,9 @@ def _inflate_job(item: dict[str, Any]) -> dict[str, Any]:
     return item
 
 
-def list_jobs(engine: DatabaseEngine, filters: dict[str, Any]) -> dict[str, Any]:
-    clauses = []
+def build_jobs_where_clause(filters: dict[str, Any]) -> tuple[str, list[Any]]:
+    """Build WHERE clause - result is SQL injection safe (uses ? placeholders)."""
+    clauses: list[str] = []
     params: list[Any] = []
     keyword = filters.get("keyword")
     if keyword:
@@ -211,10 +212,26 @@ def list_jobs(engine: DatabaseEngine, filters: dict[str, Any]) -> dict[str, Any]
         clauses.append("tags LIKE ?")
         params.append(f"%{tag}%")
     where = "WHERE " + " AND ".join(clauses) if clauses else ""
+    assert where.count("?") == len(params), "Param count mismatch"
+    return where, params
+
+
+def list_jobs(engine: DatabaseEngine, filters: dict[str, Any]) -> dict[str, Any]:
+    where, params = build_jobs_where_clause(filters)
+    limit = filters.get("limit", 100)
+    offset = filters.get("offset", 0)
     with connect(engine) as conn:
         total = conn.execute(f"SELECT COUNT(*) AS count FROM jobs {where}", params).fetchone()["count"]
-        rows = conn.execute(f"SELECT * FROM jobs {where} ORDER BY fetched_at DESC, id DESC LIMIT 500", params).fetchall()
-    return {"total": total, "items": [_inflate_job(dict(row)) for row in rows]}
+        rows = conn.execute(
+            f"SELECT * FROM jobs {where} ORDER BY fetched_at DESC, id DESC LIMIT ? OFFSET ?",
+            params + [limit, offset]
+        ).fetchall()
+    return {
+        "total": total,
+        "items": [_inflate_job(dict(row)) for row in rows],
+        "limit": limit,
+        "offset": offset,
+    }
 
 
 def get_job(engine: DatabaseEngine, job_id: int) -> dict[str, Any]:

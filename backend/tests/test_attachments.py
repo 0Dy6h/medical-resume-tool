@@ -60,3 +60,24 @@ def test_parse_xlsx_table_ignores_empty_or_header_only_sheets():
 
     assert parse_xlsx_table(empty) == []
     assert parse_xlsx_table(header_only) == []
+
+
+def test_parse_xlsx_table_handles_empty_data_rows():
+    """空数据行（仅表头无内容）应被跳过。"""
+    content = make_workbook_bytes(
+        [
+            ["招聘单位", "岗位名称", "专业"],
+            ["", "", ""],
+            ["北京医院", "临床医师", "临床医学"],
+        ]
+    )
+    rows = parse_xlsx_table(content)
+    assert len(rows) == 1
+    assert rows[0].values["岗位名称"] == "临床医师"
+
+
+def test_parse_xlsx_table_rejects_malformed_file():
+    """非 xlsx 格式文件应抛出异常。"""
+    import pytest
+    with pytest.raises(Exception):
+        parse_xlsx_table(b"not an xlsx file")

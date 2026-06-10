@@ -8,11 +8,10 @@ from __future__ import annotations
 
 import re
 from typing import Any
-from urllib.parse import urljoin
 
-import httpx
 from bs4 import BeautifulSoup
 
+from app.services.adapters.adapter_base import extract_links_by_keyword, fetch_articles
 from app.services.attachments import attachment_status, extract_attachment_links
 from app.services.classifier import normalize_text
 from app.services.crawler import ParsedJob, parse_job_from_text
@@ -20,19 +19,7 @@ from app.services.crawler import ParsedJob, parse_job_from_text
 
 def extract_article_links(html: str, base_url: str) -> list[dict[str, str]]:
     """从列表页提取公告链接。"""
-    soup = BeautifulSoup(html, "html.parser")
-    results = []
-    for a in soup.find_all("a", href=True):
-        text = a.get_text(strip=True)
-        if not (10 < len(text) < 80):
-            continue
-        if not any(kw in text for kw in ["招聘", "公告", "博士后", "岗位"]):
-            continue
-        href = a["href"]
-        if not href.startswith("http"):
-            href = urljoin(base_url, href)
-        results.append({"title": text, "url": href})
-    return results
+    return extract_links_by_keyword(html, base_url, keywords=["招聘", "公告", "博士后", "岗位"])
 
 
 def extract_jobs_from_table_article(html: str, source_url: str, institution: dict[str, Any]) -> list[ParsedJob]:
@@ -110,25 +97,10 @@ def extract_jobs_from_table_article(html: str, source_url: str, institution: dic
 
 async def crawl_hrbmu(institution: dict[str, Any]) -> list[ParsedJob]:
     """抓取哈医大招聘列表并解析。"""
-    listing_url = institution["listing_url"]
-    async with httpx.AsyncClient(
-        timeout=20,
-        follow_redirects=True,
-        headers={"User-Agent": "MedicalJobMVP/0.1"},
-    ) as client:
-        resp = await client.get(listing_url)
-        resp.raise_for_status()
-        articles = extract_article_links(resp.text, listing_url)
-
-        jobs: list[ParsedJob] = []
-        for article in articles[:6]:
-            try:
-                art_resp = await client.get(article["url"])
-                art_resp.raise_for_status()
-                parsed = extract_jobs_from_table_article(
-                    art_resp.text, article["url"], institution
-                )
-                jobs.extend(parsed)
-            except httpx.HTTPError:
-                continue
-    return jobs
+    return await fetch_articles(
+        institution,
+        extract_links=extract_article_links,
+        parse_article=extract_jobs_from_table_article,
+        limit=6,
+        fetch_attachments=False,
+    )
