@@ -13,6 +13,7 @@ from urllib.parse import urljoin
 import httpx
 from bs4 import BeautifulSoup
 
+from app.services.attachments import attachment_status, extract_attachment_links
 from app.services.classifier import normalize_text
 from app.services.crawler import ParsedJob, parse_job_from_text
 
@@ -73,17 +74,19 @@ def extract_jobs_from_article(html: str, source_url: str, institution: dict[str,
 
     body = f"报考条件：{conditions}" if conditions else text_clean[:2000]
 
-    return [
-        parse_job_from_text(
-            title=title,
-            body=body,
-            source_url=source_url,
-            institution_type=institution["institution_type"],
-            region=institution["region"],
-            parser_name="njmu-notice-v1",
-            department=None,
-        )
+    job = parse_job_from_text(
+        title=title,
+        body=body,
+        source_url=source_url,
+        institution_type=institution["institution_type"],
+        region=institution["region"],
+        parser_name="njmu-notice-v1",
+        department=None,
+    )
+    job.extraction_evidence["attachments"] = [
+        attachment_status(item, "discovered") for item in extract_attachment_links(html, source_url)
     ]
+    return [job]
 
 
 async def crawl_njmu(institution: dict[str, Any]) -> list[ParsedJob]:

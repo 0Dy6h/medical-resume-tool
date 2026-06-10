@@ -13,6 +13,7 @@ from urllib.parse import urljoin
 import httpx
 from bs4 import BeautifulSoup
 
+from app.services.attachments import attachment_status, extract_attachment_links
 from app.services.classifier import normalize_text
 from app.services.crawler import ParsedJob, parse_job_from_text
 
@@ -52,17 +53,19 @@ def extract_jobs_from_table_article(html: str, source_url: str, institution: dic
         text = normalize_text(content.get_text("\n"))
         title_tag = soup.find("title")
         title = normalize_text(title_tag.get_text()[:60]) if title_tag else "哈医大招聘公告"
-        return [
-            parse_job_from_text(
-                title=title,
-                body=text[:2000],
-                source_url=source_url,
-                institution_type=institution["institution_type"],
-                region=institution["region"],
-                parser_name="hrbmu-notice-v1",
-                department=None,
-            )
+        job = parse_job_from_text(
+            title=title,
+            body=text[:2000],
+            source_url=source_url,
+            institution_type=institution["institution_type"],
+            region=institution["region"],
+            parser_name="hrbmu-notice-v1",
+            department=None,
+        )
+        job.extraction_evidence["attachments"] = [
+            attachment_status(item, "discovered") for item in extract_attachment_links(html, source_url)
         ]
+        return [job]
 
     # 解析表格：提取岗位和科室信息做汇总
     table = tables[0]

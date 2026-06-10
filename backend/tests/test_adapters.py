@@ -2,8 +2,22 @@
 from pathlib import Path
 
 import pytest
+from openpyxl import Workbook
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures"
+
+
+def make_xlsx_bytes(rows: list[list[str]]) -> bytes:
+    from io import BytesIO
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "岗位信息表"
+    for row in rows:
+        sheet.append(row)
+    output = BytesIO()
+    workbook.save(output)
+    return output.getvalue()
 
 
 class TestZ2HospitalAdapter:
@@ -86,6 +100,57 @@ class TestChinaCDCAdapter:
         assert len(jobs) >= 1
         assert jobs[0].parser_name == "chinacdc-notice-v1"
 
+    def test_extract_jobs_from_annual_notice_xlsx_attachment(self):
+        from app.services.adapters.chinacdc import extract_jobs_from_article
+        from app.services.attachments import extract_attachment_links
+
+        html = (FIXTURES / "chinacdc" / "article.html").read_text(encoding="utf-8")
+        source_url = "https://www.chinacdc.cn/rcjs/rczp/202603/t20260306_315301.html"
+        attachments = extract_attachment_links(html, source_url)
+        xlsx_url = next((item["url"] for item in attachments if item["extension"] == ".xlsx"), source_url + "#test.xlsx")
+        institution = {"institution_type": "研究机构", "region": "北京"}
+        jobs = extract_jobs_from_article(
+            html,
+            source_url,
+            institution,
+            attachment_bytes_by_url={
+                xlsx_url: make_xlsx_bytes(
+                    [
+                        ["招聘单位", "岗位名称", "专业", "学历"],
+                        ["中国疾控中心", "公共卫生研究岗", "公共卫生", "硕士"],
+                    ]
+                )
+            },
+        )
+
+        parsed = [job for job in jobs if job.parser_name == "chinacdc-xlsx-v1"]
+        assert len(parsed) == 1
+        assert parsed[0].source_url == f"{xlsx_url}#岗位信息表-2"
+        assert parsed[0].extraction_evidence["attachment_url"] == xlsx_url
+        assert parsed[0].extraction_evidence["announcement_url"] == source_url
+
+    def test_extract_jobs_from_annual_notice_marks_attachment_failure(self):
+        from app.services.adapters.chinacdc import extract_jobs_from_article
+        from app.services.attachments import extract_attachment_links
+
+        html = (FIXTURES / "chinacdc" / "article.html").read_text(encoding="utf-8")
+        source_url = "https://www.chinacdc.cn/rcjs/rczp/202603/t20260306_315301.html"
+        attachments = extract_attachment_links(html, source_url)
+        xlsx_url = next((item["url"] for item in attachments if item["extension"] == ".xlsx"), source_url + "#test.xlsx")
+        institution = {"institution_type": "研究机构", "region": "北京"}
+
+        jobs = extract_jobs_from_article(
+            html,
+            source_url,
+            institution,
+            attachment_errors_by_url={xlsx_url: "network unavailable"},
+        )
+
+        assert jobs[0].parser_name == "chinacdc-notice-v1"
+        failed = jobs[0].extraction_evidence["attachments"][0]
+        assert failed["status"] == "failed"
+        assert failed["error"] == "network unavailable"
+
 
 class TestNJMUAdapter:
     def test_extract_article_links_from_listing(self):
@@ -153,3 +218,69 @@ class TestBJMUAdapter:
         assert len(jobs) >= 1
         assert jobs[0].parser_name == "bjmu-notice-v1"
         assert jobs[0].confidence > 0
+
+    def test_extract_article_attachment_links(self):
+        from app.services.attachments import extract_attachment_links
+
+        html = (FIXTURES / "bjmu" / "article.html").read_text(encoding="utf-8")
+        attachments = extract_attachment_links(html, "https://rsc.bjmu.edu.cn/rczp/js/test.htm")
+
+        assert any(item["extension"] == ".xlsx" for item in attachments)
+        assert any("岗位信息表" in item["name"] for item in attachments)
+
+    def test_extract_jobs_from_xlsx_attachment(self):
+        from app.services.adapters.bjmu import extract_jobs_from_article
+        from app.services.attachments import extract_attachment_links
+
+        html = (FIXTURES / "bjmu" / "article.html").read_text(encoding="utf-8")
+        source_url = "https://rsc.bjmu.edu.cn/rczp/js/test.htm"
+        attachments = extract_attachment_links(html, source_url)
+        xlsx_url = next(item["url"] for item in attachments if item["extension"] == ".xlsx")
+        institution = {"institution_type": "高校", "region": "北京"}
+
+        jobs = extract_jobs_from_article(
+            html,
+            source_url,
+            institution,
+            attachment_bytes_by_url={
+                xlsx_url: make_xlsx_bytes(
+                    [
+                        ["招聘单位", "岗位名称", "专业", "学历"],
+                        ["北京肿瘤医院", "临床医师", "临床医学", "博士"],
+                        ["北京肿瘤医院", "科研助理", "公共卫生", "硕士"],
+                    ]
+                )
+            },
+        )
+
+        parsed = [job for job in jobs if job.parser_name == "bjmu-xlsx-v1"]
+        assert len(parsed) == 2
+        assert parsed[0].source_url == f"{xlsx_url}#岗位信息表-2"
+        assert parsed[0].extraction_evidence["attachment_url"] == xlsx_url
+        assert parsed[0].extraction_evidence["attachment_name"].endswith(".xlsx")
+        assert parsed[0].extraction_evidence["sheet_name"] == "岗位信息表"
+        assert parsed[0].extraction_evidence["row_index"] == 2
+        assert parsed[0].extraction_evidence["headers"] == ["招聘单位", "岗位名称", "专业", "学历"]
+
+    def test_extract_jobs_marks_corrupt_xlsx_as_failed_attachment(self):
+        from app.services.adapters.bjmu import extract_jobs_from_article
+        from app.services.attachments import extract_attachment_links
+
+        html = (FIXTURES / "bjmu" / "article.html").read_text(encoding="utf-8")
+        source_url = "https://rsc.bjmu.edu.cn/rczp/js/test.htm"
+        attachments = extract_attachment_links(html, source_url)
+        xlsx_url = next(item["url"] for item in attachments if item["extension"] == ".xlsx")
+        institution = {"institution_type": "高校", "region": "北京"}
+
+        jobs = extract_jobs_from_article(
+            html,
+            source_url,
+            institution,
+            attachment_bytes_by_url={xlsx_url: b"not an xlsx file"},
+        )
+
+        assert jobs[0].parser_name == "bjmu-notice-v1"
+        failed = jobs[0].extraction_evidence["attachments"][0]
+        assert failed["status"] == "failed"
+        assert "File is not a zip file" in failed["error"]
+        assert all(job.parser_name != "bjmu-xlsx-v1" for job in jobs)

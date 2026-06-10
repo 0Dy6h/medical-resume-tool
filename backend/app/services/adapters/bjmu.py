@@ -12,6 +12,11 @@ from urllib.parse import urljoin
 import httpx
 from bs4 import BeautifulSoup
 
+from app.services.attachments import (
+    attachment_status,
+    build_jobs_from_xlsx_attachment,
+    extract_attachment_links,
+)
 from app.services.classifier import normalize_text
 from app.services.crawler import ParsedJob, parse_job_from_text
 
@@ -33,7 +38,14 @@ def extract_article_links(html: str, base_url: str) -> list[dict[str, str]]:
     return results
 
 
-def extract_jobs_from_article(html: str, source_url: str, institution: dict[str, Any]) -> list[ParsedJob]:
+def extract_jobs_from_article(
+    html: str,
+    source_url: str,
+    institution: dict[str, Any],
+    *,
+    attachment_bytes_by_url: dict[str, bytes] | None = None,
+    attachment_errors_by_url: dict[str, str] | None = None,
+) -> list[ParsedJob]:
     """从公告页提取岗位信息。"""
     soup = BeautifulSoup(html, "html.parser")
     # bjmu 页面结构：找正文 div
@@ -72,17 +84,41 @@ def extract_jobs_from_article(html: str, source_url: str, institution: dict[str,
     )
     body = normalize_text(cond_match.group(1)) if cond_match else text_clean[:2000]
 
-    return [
-        parse_job_from_text(
-            title=title,
-            body=body,
-            source_url=source_url,
-            institution_type=institution["institution_type"],
-            region=institution["region"],
-            parser_name="bjmu-notice-v1",
-            department=None,
-        )
+    attachments = extract_attachment_links(html, source_url)
+    notice = parse_job_from_text(
+        title=title,
+        body=body,
+        source_url=source_url,
+        institution_type=institution["institution_type"],
+        region=institution["region"],
+        parser_name="bjmu-notice-v1",
+        department=None,
+    )
+    notice.extraction_evidence["attachments"] = [
+        _status_for_attachment(item, attachment_bytes_by_url, attachment_errors_by_url) for item in attachments
     ]
+    attachment_statuses = notice.extraction_evidence["attachments"]
+
+    jobs = [notice]
+    for index, attachment in enumerate(attachments):
+        if attachment["extension"] not in {".xlsx", ".xls"}:
+            continue
+        content = (attachment_bytes_by_url or {}).get(attachment["url"])
+        if not content:
+            continue
+        try:
+            jobs.extend(
+                build_jobs_from_xlsx_attachment(
+                    content=content,
+                    attachment=attachment,
+                    announcement_url=source_url,
+                    institution=institution,
+                    parser_name="bjmu-xlsx-v1",
+                )
+            )
+        except Exception as exc:
+            attachment_statuses[index] = attachment_status(attachment, "failed", str(exc))
+    return jobs
 
 
 async def crawl_bjmu(institution: dict[str, Any]) -> list[ParsedJob]:
@@ -102,8 +138,38 @@ async def crawl_bjmu(institution: dict[str, Any]) -> list[ParsedJob]:
             try:
                 art_resp = await client.get(article["url"])
                 art_resp.raise_for_status()
-                parsed = extract_jobs_from_article(art_resp.text, article["url"], institution)
+                attachments = extract_attachment_links(art_resp.text, article["url"])
+                attachment_bytes_by_url: dict[str, bytes] = {}
+                attachment_errors_by_url: dict[str, str] = {}
+                for attachment in attachments:
+                    if attachment["extension"] not in {".xlsx", ".xls"}:
+                        continue
+                    try:
+                        file_resp = await client.get(attachment["url"])
+                        file_resp.raise_for_status()
+                        attachment_bytes_by_url[attachment["url"]] = file_resp.content
+                    except httpx.HTTPError as exc:
+                        attachment_errors_by_url[attachment["url"]] = str(exc)
+                parsed = extract_jobs_from_article(
+                    art_resp.text,
+                    article["url"],
+                    institution,
+                    attachment_bytes_by_url=attachment_bytes_by_url,
+                    attachment_errors_by_url=attachment_errors_by_url,
+                )
                 jobs.extend(parsed)
             except httpx.HTTPError:
                 continue
     return jobs
+
+
+def _status_for_attachment(
+    attachment: dict[str, str],
+    attachment_bytes_by_url: dict[str, bytes] | None,
+    attachment_errors_by_url: dict[str, str] | None,
+) -> dict[str, str]:
+    if attachment["url"] in (attachment_bytes_by_url or {}):
+        return attachment_status(attachment, "parsed")
+    if attachment["url"] in (attachment_errors_by_url or {}):
+        return attachment_status(attachment, "failed", (attachment_errors_by_url or {})[attachment["url"]])
+    return attachment_status(attachment, "discovered")

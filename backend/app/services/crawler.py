@@ -169,11 +169,11 @@ async def crawl_institution(institution: dict[str, Any]) -> list[ParsedJob]:
     for attempt in range(retries + 1):
         try:
             return await _crawl_institution_once(institution)
-        except httpx.TimeoutException:
+        except httpx.TransportError:
             if attempt >= retries:
                 raise
             await asyncio.sleep(base_delay * (2**attempt))
-    return []
+    raise AssertionError("unreachable")
 
 
 async def _crawl_institution_once(institution: dict[str, Any]) -> list[ParsedJob]:

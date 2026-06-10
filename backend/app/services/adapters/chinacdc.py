@@ -14,6 +14,11 @@ from urllib.parse import urljoin
 import httpx
 from bs4 import BeautifulSoup
 
+from app.services.attachments import (
+    attachment_status,
+    build_jobs_from_xlsx_attachment,
+    extract_attachment_links,
+)
 from app.services.classifier import normalize_text
 from app.services.crawler import ParsedJob, parse_job_from_text
 
@@ -39,7 +44,14 @@ def extract_article_links(html: str, base_url: str) -> list[dict[str, str]]:
     return results
 
 
-def extract_jobs_from_article(html: str, source_url: str, institution: dict[str, Any]) -> list[ParsedJob]:
+def extract_jobs_from_article(
+    html: str,
+    source_url: str,
+    institution: dict[str, Any],
+    *,
+    attachment_bytes_by_url: dict[str, bytes] | None = None,
+    attachment_errors_by_url: dict[str, str] | None = None,
+) -> list[ParsedJob]:
     """从公告页提取岗位信息。
 
     部门级启事通常含一个岗位，格式：
@@ -51,23 +63,46 @@ def extract_jobs_from_article(html: str, source_url: str, institution: dict[str,
         return []
     text = content.get_text("\n")
     text_clean = normalize_text(text)
+    attachments = extract_attachment_links(html, source_url)
 
     # 判断是否为部门级启事（含"岗位职责"章节）
     if "岗位职责" not in text_clean and "工作内容" not in text_clean:
         # 年度公开招聘公告，岗位在附件中，只提取公告标题作为记录
         title_tag = soup.find("title")
         title = title_tag.get_text(strip=True)[:60] if title_tag else "中疾控招聘公告"
-        return [
-            parse_job_from_text(
-                title=normalize_text(title),
-                body=text_clean[:2000],
-                source_url=source_url,
-                institution_type=institution["institution_type"],
-                region=institution["region"],
-                parser_name="chinacdc-notice-v1",
-                department=None,
-            )
+        notice = parse_job_from_text(
+            title=normalize_text(title),
+            body=text_clean[:2000],
+            source_url=source_url,
+            institution_type=institution["institution_type"],
+            region=institution["region"],
+            parser_name="chinacdc-notice-v1",
+            department=None,
+        )
+        notice.extraction_evidence["attachments"] = [
+            _status_for_attachment(item, attachment_bytes_by_url, attachment_errors_by_url) for item in attachments
         ]
+        attachment_statuses = notice.extraction_evidence["attachments"]
+        jobs = [notice]
+        for index, attachment in enumerate(attachments):
+            if attachment["extension"] not in {".xlsx", ".xls"}:
+                continue
+            content_bytes = (attachment_bytes_by_url or {}).get(attachment["url"])
+            if not content_bytes:
+                continue
+            try:
+                jobs.extend(
+                    build_jobs_from_xlsx_attachment(
+                        content=content_bytes,
+                        attachment=attachment,
+                        announcement_url=source_url,
+                        institution=institution,
+                        parser_name="chinacdc-xlsx-v1",
+                    )
+                )
+            except Exception as exc:
+                attachment_statuses[index] = attachment_status(attachment, "failed", str(exc))
+        return jobs
 
     # 部门级启事解析
     # 提取岗位名称
@@ -92,17 +127,19 @@ def extract_jobs_from_article(html: str, source_url: str, institution: dict[str,
 
     body = f"岗位职责：{responsibilities}\n任职要求：{requirements}" if responsibilities else text_clean[:2000]
 
-    return [
-        parse_job_from_text(
-            title=normalize_text(job_title),
-            body=body,
-            source_url=source_url,
-            institution_type=institution["institution_type"],
-            region=institution["region"],
-            parser_name="chinacdc-dept-v1",
-            department=None,
-        )
+    job = parse_job_from_text(
+        title=normalize_text(job_title),
+        body=body,
+        source_url=source_url,
+        institution_type=institution["institution_type"],
+        region=institution["region"],
+        parser_name="chinacdc-dept-v1",
+        department=None,
+    )
+    job.extraction_evidence["attachments"] = [
+        _status_for_attachment(item, attachment_bytes_by_url, attachment_errors_by_url) for item in attachments
     ]
+    return [job]
 
 
 async def crawl_chinacdc(institution: dict[str, Any]) -> list[ParsedJob]:
@@ -122,8 +159,38 @@ async def crawl_chinacdc(institution: dict[str, Any]) -> list[ParsedJob]:
             try:
                 art_resp = await client.get(article["url"])
                 art_resp.raise_for_status()
-                parsed = extract_jobs_from_article(art_resp.text, article["url"], institution)
+                attachments = extract_attachment_links(art_resp.text, article["url"])
+                attachment_bytes_by_url: dict[str, bytes] = {}
+                attachment_errors_by_url: dict[str, str] = {}
+                for attachment in attachments:
+                    if attachment["extension"] not in {".xlsx", ".xls"}:
+                        continue
+                    try:
+                        file_resp = await client.get(attachment["url"])
+                        file_resp.raise_for_status()
+                        attachment_bytes_by_url[attachment["url"]] = file_resp.content
+                    except httpx.HTTPError as exc:
+                        attachment_errors_by_url[attachment["url"]] = str(exc)
+                parsed = extract_jobs_from_article(
+                    art_resp.text,
+                    article["url"],
+                    institution,
+                    attachment_bytes_by_url=attachment_bytes_by_url,
+                    attachment_errors_by_url=attachment_errors_by_url,
+                )
                 jobs.extend(parsed)
             except httpx.HTTPError:
                 continue
     return jobs
+
+
+def _status_for_attachment(
+    attachment: dict[str, str],
+    attachment_bytes_by_url: dict[str, bytes] | None,
+    attachment_errors_by_url: dict[str, str] | None,
+) -> dict[str, str]:
+    if attachment["url"] in (attachment_bytes_by_url or {}):
+        return attachment_status(attachment, "parsed")
+    if attachment["url"] in (attachment_errors_by_url or {}):
+        return attachment_status(attachment, "failed", (attachment_errors_by_url or {})[attachment["url"]])
+    return attachment_status(attachment, "discovered")
