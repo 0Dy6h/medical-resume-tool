@@ -118,6 +118,40 @@ export function JobsPage() {
             <div className="tag-row">
               {detail.tags.map((tag) => <span className="tag" key={tag}>{tag}</span>)}
             </div>
+            <h3>来源证据</h3>
+            <div className="source-evidence">
+              <EvidenceRow label="来源 URL" value={detail.source_url} link />
+              <EvidenceRow label="文本哈希" value={detail.source_text_hash} />
+              <EvidenceRow label="抓取时间" value={formatDate(detail.fetched_at)} />
+              <EvidenceRow label="解析器" value={detail.parser_name} />
+              <EvidenceRow label="置信度" value={`${Math.round(detail.confidence * 100)}%`} />
+              {detail.extraction_evidence.announcement_url && (
+                <EvidenceRow label="公告 URL" value={String(detail.extraction_evidence.announcement_url)} link />
+              )}
+              {detail.extraction_evidence.attachment_url && (
+                <>
+                  <EvidenceRow label="附件" value={String(detail.extraction_evidence.attachment_name ?? detail.extraction_evidence.attachment_url)} />
+                  <EvidenceRow label="附件 URL" value={String(detail.extraction_evidence.attachment_url)} link />
+                  <EvidenceRow label="表格位置" value={`${detail.extraction_evidence.sheet_name ?? "工作表"} / 第 ${detail.extraction_evidence.row_index ?? "-"} 行`} />
+                </>
+              )}
+              {detail.extraction_evidence.attachments && detail.extraction_evidence.attachments.length > 0 && (
+                <div className="attachment-list">
+                  {detail.extraction_evidence.attachments.map((attachment, index) => (
+                    <div className="attachment-item" key={`${String(attachment.url)}-${index}`}>
+                      <strong>{String(attachment.name ?? "附件")}</strong>
+                      <span>{String(attachment.status ?? "discovered")}</span>
+                      {Boolean(attachment.url) && (
+                        <a href={String(attachment.url)} target="_blank" rel="noreferrer">
+                          {String(attachment.url)}
+                        </a>
+                      )}
+                      {Boolean(attachment.error) && <p>{String(attachment.error)}</p>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
             <h3>原文快照</h3>
             <pre>{detail.raw_snapshot.raw_text}</pre>
           </>
@@ -125,6 +159,22 @@ export function JobsPage() {
           <div className="empty-line">暂无选中岗位</div>
         )}
       </aside>
+    </div>
+  );
+}
+
+function EvidenceRow({ label, value, link = false }: { label: string; value?: string | null; link?: boolean }) {
+  if (!value) return null;
+  return (
+    <div className="evidence-row">
+      <span>{label}</span>
+      {link ? (
+        <a href={value} target="_blank" rel="noreferrer">
+          {value}
+        </a>
+      ) : (
+        <strong>{value}</strong>
+      )}
     </div>
   );
 }

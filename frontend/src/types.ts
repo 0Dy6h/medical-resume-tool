@@ -21,6 +21,7 @@ export type CrawlRun = {
   success_count: number;
   failure_count: number;
   error_summary: Array<Record<string, unknown>>;
+  errors?: Array<Record<string, unknown>>;
 };
 
 export type Job = {
@@ -54,7 +55,16 @@ export type JobDetail = Job & {
     fetched_at: string;
     raw_text: string;
   };
-  extraction_evidence: Record<string, unknown>;
+  extraction_evidence: Record<string, unknown> & {
+    attachments?: Array<Record<string, unknown>>;
+    announcement_url?: string;
+    attachment_url?: string;
+    attachment_name?: string;
+    sheet_name?: string;
+    row_index?: number;
+    headers?: string[];
+    parser_warning?: string;
+  };
 };
 
 export type JobList = {
@@ -72,6 +82,10 @@ export type AnalyticsSummary = {
     jobs: number;
     institutions: number;
     regions: number;
+    parsers: number;
+    low_confidence_jobs: number;
+    attachment_sourced_jobs: number;
+    failed_attachment_events: number;
   };
   job_categories: CountItem[];
   education_levels: CountItem[];
@@ -82,6 +96,17 @@ export type AnalyticsSummary = {
     institution: string;
     focus: CountItem[];
   }>;
+  parser_quality: ParserQuality[];
+};
+
+export type ParserQuality = {
+  parser_name: string;
+  jobs: number;
+  low_confidence_jobs: number;
+  attachment_sourced_jobs: number;
+  failed_attachment_events: number;
+  average_confidence: number;
+  review_status: "review" | "watch" | "stable" | string;
 };
 
 export type Profile = {
@@ -128,4 +153,3 @@ export type Report = {
   filters: Record<string, unknown>;
   created_at: string;
 };
-

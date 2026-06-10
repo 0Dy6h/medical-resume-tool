@@ -62,12 +62,24 @@ export function CrawlPage() {
       </div>
 
       {run && (
-        <section className="panel run-panel">
-          <StatusPill value={run.status} />
-          <span>任务 #{run.id}</span>
-          <span>成功 {run.success_count}</span>
-          <span>失败 {run.failure_count}</span>
-          <span>{formatDate(run.completed_at)}</span>
+        <section className="panel run-panel run-panel-detail">
+          <div className="run-summary">
+            <StatusPill value={run.status} />
+            <span>任务 #{run.id}</span>
+            <span>成功 {run.success_count}</span>
+            <span>失败 {run.failure_count}</span>
+            <span>{formatDate(run.completed_at)}</span>
+          </div>
+          {(run.errors ?? run.error_summary).length > 0 && (
+            <div className="error-strip">
+              {(run.errors ?? run.error_summary).map((error, index) => (
+                <div className="error-item" key={`${String(error.institution_id)}-${index}`}>
+                  <strong>{String(error.institution ?? error.institution_id ?? "未知机构")}</strong>
+                  <span>{String(error.error ?? "抓取失败")}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </section>
       )}
 
@@ -104,7 +116,12 @@ export function CrawlPage() {
                 <td>{item.institution_type}</td>
                 <td>{item.region}</td>
                 <td>{item.crawl_strategy}</td>
-                <td><StatusPill value={item.last_status} /></td>
+                <td>
+                  <div className="status-cell">
+                    <StatusPill value={item.last_status} />
+                    {item.last_error && <span className="status-error">{item.last_error}</span>}
+                  </div>
+                </td>
                 <td>{formatDate(item.last_crawled_at)}</td>
               </tr>
             ))}
@@ -114,4 +131,3 @@ export function CrawlPage() {
     </div>
   );
 }
-

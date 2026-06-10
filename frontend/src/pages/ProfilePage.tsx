@@ -52,6 +52,37 @@ const configs: CollectionConfig[] = [
     ]
   },
   {
+    key: "publications",
+    title: "发表论文",
+    fields: [
+      { key: "title", label: "标题" },
+      { key: "journal", label: "期刊" },
+      { key: "year", label: "年份" },
+      { key: "authors", label: "作者", area: true },
+      { key: "doi", label: "DOI" }
+    ]
+  },
+  {
+    key: "teaching",
+    title: "教学经历",
+    fields: [
+      { key: "course", label: "课程" },
+      { key: "role", label: "角色" },
+      { key: "institution", label: "机构" },
+      { key: "year", label: "年份" }
+    ]
+  },
+  {
+    key: "awards",
+    title: "获奖荣誉",
+    fields: [
+      { key: "name", label: "奖项" },
+      { key: "issuer", label: "颁发机构" },
+      { key: "year", label: "年份" },
+      { key: "level", label: "级别" }
+    ]
+  },
+  {
     key: "certificates",
     title: "证书资质",
     fields: [
