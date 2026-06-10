@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import os
 import zipfile
 from html import escape
 from pathlib import Path
@@ -8,6 +9,24 @@ from typing import Any
 
 from fpdf import FPDF
 from fpdf.enums import XPos, YPos
+
+CJK_FONT_CANDIDATES = [
+    Path(value)
+    for value in (
+        os.getenv("PDF_FONT_PATH"),
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/opentype/noto/NotoSansCJKsc-Regular.otf",
+        "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+        "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+        "/System/Library/Fonts/PingFang.ttc",
+        "/Library/Fonts/Arial Unicode.ttf",
+        "C:/Windows/Fonts/msyh.ttc",
+        "C:/Windows/Fonts/msyh.ttf",
+        "C:/Windows/Fonts/simsun.ttc",
+    )
+    if value
+]
 
 
 def resume_to_plain_text(draft: dict[str, Any]) -> str:
@@ -62,14 +81,15 @@ def export_pdf(draft: dict[str, Any]) -> bytes:
     pdf = FPDF()
     pdf.add_page()
 
-    # Use Microsoft YaHei on Windows, fallback to system fonts
-    font_path = Path("C:/Windows/Fonts/msyh.ttc")
-    if font_path.exists():
-        pdf.add_font("yahei", style="", fname=str(font_path))
-        pdf.set_font("yahei", size=12)
-    else:
-        # Fallback: try using fpdf2's Unicode support with DejaVu
-        pdf.set_font("helvetica", size=12)
+    font_path = _find_cjk_font()
+    if font_path is None:
+        searched = ", ".join(str(path) for path in CJK_FONT_CANDIDATES)
+        raise RuntimeError(
+            "No CJK-capable PDF font found. Install fonts-noto-cjk or set PDF_FONT_PATH "
+            f"to a Unicode font file. Searched: {searched}"
+        )
+    pdf.add_font("cjk", style="", fname=str(font_path))
+    pdf.set_font("cjk", size=12)
 
     # Title
     pdf.set_font_size(16)
@@ -92,3 +112,10 @@ def export_pdf(draft: dict[str, Any]) -> bytes:
         pdf.ln(3)
 
     return bytes(pdf.output())
+
+
+def _find_cjk_font() -> Path | None:
+    for font_path in CJK_FONT_CANDIDATES:
+        if font_path.exists():
+            return font_path
+    return None
