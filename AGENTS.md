@@ -9,7 +9,8 @@ This repo is a local MVP for Chinese medical job intelligence and truthful resum
 - Do not generate resume facts that are absent from the structured profile.
 - Keep every job record traceable to `source_url`, `source_text_hash`, `fetched_at`, and `parser_name`.
 - MVP data collection is public official recruitment pages only. Do not add login-based platform scraping or anti-bot bypasses.
-- The first six institutions use deterministic fixture data for demo stability; the remaining seed institutions are disabled generic crawlers until source-specific adapters are added.
+- The first six institutions use deterministic fixture data for demo stability. Six official-site adapters are enabled (`nfyy`, `z2hospital`, `bjmu`, `chinacdc`, `hrbmu`, `njmu`); the remaining disabled seeds need source-specific adapters or explicit blocked reasons.
+- PDF attachments are currently discovered and recorded as evidence only; do not add PDF table parsing unless the slice includes fixtures and tests.
 
 ## Commands
 
@@ -36,6 +37,7 @@ pnpm dev
 - `backend/app/services/database.py` - SQLite schema and seed initialization.
 - `backend/app/services/seeds.py` - 30 institution seed records.
 - `backend/app/services/crawler.py` - fixture and generic crawler/parser, adapter dispatch.
+- `backend/app/services/attachments.py` - attachment discovery, xlsx table parsing, and attachment-derived job construction.
 - `backend/app/services/adapters/nfyy.py` - 南方医院 announcement parser (real site adapter).
 - `backend/app/services/adapters/z2hospital.py` - 浙大二院 listing+article parser.
 - `backend/app/services/adapters/chinacdc.py` - 中疾控 listing+department notice parser.
@@ -58,4 +60,3 @@ pnpm dev
 ## Verification Discipline
 
 Run backend tests after backend changes. Run `pnpm test`, `pnpm typecheck`, and `pnpm build` after frontend changes. For cross-stack behavior, start both services and verify `/health`, `/api/jobs`, `/api/analytics/summary`, and `http://127.0.0.1:5173`.
-
