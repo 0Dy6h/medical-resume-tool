@@ -84,6 +84,7 @@ class AnalyticsSummary(BaseModel):
     regions: list[dict[str, Any]]
     common_capabilities: list[dict[str, Any]]
     institution_focus: list[dict[str, Any]]
+    parser_quality: list[dict[str, Any]]
 
 
 class ProfilePayload(BaseModel):

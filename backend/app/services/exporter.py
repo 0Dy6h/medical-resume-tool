@@ -3,7 +3,11 @@ from __future__ import annotations
 import io
 import zipfile
 from html import escape
+from pathlib import Path
 from typing import Any
+
+from fpdf import FPDF
+from fpdf.enums import XPos, YPos
 
 
 def resume_to_plain_text(draft: dict[str, Any]) -> str:
@@ -54,28 +58,37 @@ def _paragraph(text: str, style: str = "Normal") -> list[str]:
 
 
 def export_pdf(draft: dict[str, Any]) -> bytes:
-    text = resume_to_plain_text(draft)
-    escaped = text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
-    stream = f"BT /F1 11 Tf 50 790 Td 14 TL ({escaped[:3500]}) Tj ET".encode("utf-8", errors="ignore")
-    objects = [
-        b"<< /Type /Catalog /Pages 2 0 R >>",
-        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
-        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
-        b"<< /Length " + str(len(stream)).encode() + b" >>\nstream\n" + stream + b"\nendstream",
-    ]
-    output = io.BytesIO()
-    output.write(b"%PDF-1.4\n")
-    offsets = [0]
-    for index, obj in enumerate(objects, start=1):
-        offsets.append(output.tell())
-        output.write(f"{index} 0 obj\n".encode())
-        output.write(obj)
-        output.write(b"\nendobj\n")
-    xref = output.tell()
-    output.write(f"xref\n0 {len(objects) + 1}\n".encode())
-    output.write(b"0000000000 65535 f \n")
-    for offset in offsets[1:]:
-        output.write(f"{offset:010d} 00000 n \n".encode())
-    output.write(f"trailer << /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF".encode())
-    return output.getvalue()
+    """Export resume draft to PDF with CJK support using fpdf2."""
+    pdf = FPDF()
+    pdf.add_page()
+
+    # Use Microsoft YaHei on Windows, fallback to system fonts
+    font_path = Path("C:/Windows/Fonts/msyh.ttc")
+    if font_path.exists():
+        pdf.add_font("yahei", style="", fname=str(font_path))
+        pdf.set_font("yahei", size=12)
+    else:
+        # Fallback: try using fpdf2's Unicode support with DejaVu
+        pdf.set_font("helvetica", size=12)
+
+    # Title
+    pdf.set_font_size(16)
+    pdf.cell(0, 10, draft["title"], new_x=XPos.LMARGIN, new_y=YPos.NEXT, align="C")
+    pdf.ln(5)
+
+    # Sections
+    for section in draft["sections"]:
+        pdf.set_font_size(14)
+        pdf.cell(0, 8, section["title"], new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.set_font_size(11)
+        pdf.ln(2)
+
+        for item in section.get("items", []):
+            text = item.get("text", "")
+            if text:
+                pdf.multi_cell(0, 6, f"• {text}")
+                pdf.ln(1)
+
+        pdf.ln(3)
+
+    return bytes(pdf.output())

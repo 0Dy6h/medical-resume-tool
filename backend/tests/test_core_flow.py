@@ -221,6 +221,89 @@ def test_job_detail_and_analytics_summary(tmp_path):
     assert payload["common_capabilities"]
 
 
+def test_analytics_summary_surfaces_parser_quality_review(tmp_path, monkeypatch):
+    monkeypatch.setenv("CRAWL_DELAY_SECONDS", "0")
+    client = make_client(tmp_path)
+
+    async def crawl_quality_sample(institution):  # noqa: ANN001
+        return [
+            ParsedJob(
+                title="临床医师",
+                department="北京肿瘤医院",
+                location="北京",
+                education="博士",
+                profession="临床医学",
+                job_category="临床医疗",
+                responsibilities="承担临床诊疗。",
+                requirements="临床医学博士。",
+                posted_at=None,
+                deadline=None,
+                source_url="https://example.test/jobs.xlsx#岗位信息表-2",
+                source_text_hash="quality-review-xlsx-row",
+                raw_text="岗位名称：临床医师；学历：博士",
+                tags=["临床医疗", "北京"],
+                extraction_evidence={
+                    "attachment_url": "https://example.test/jobs.xlsx",
+                    "row_index": 2,
+                },
+                fetched_at="2026-06-10T00:00:00+00:00",
+                parser_name="bjmu-xlsx-v1",
+                confidence=0.88,
+            ),
+            ParsedJob(
+                title="年度招聘公告",
+                department=None,
+                location="北京",
+                education=None,
+                profession=None,
+                job_category="综合",
+                responsibilities="详见附件。",
+                requirements="详见附件。",
+                posted_at=None,
+                deadline=None,
+                source_url="https://example.test/notice.htm",
+                source_text_hash="quality-review-notice",
+                raw_text="年度招聘公告，附件解析失败。",
+                tags=["综合", "北京"],
+                extraction_evidence={
+                    "attachments": [
+                        {
+                            "name": "岗位信息表.xlsx",
+                            "url": "https://example.test/jobs.xlsx",
+                            "extension": ".xlsx",
+                            "status": "failed",
+                            "error": "File is not a zip file",
+                        }
+                    ]
+                },
+                fetched_at="2026-06-10T00:01:00+00:00",
+                parser_name="bjmu-notice-v1",
+                confidence=0.52,
+            ),
+        ]
+
+    monkeypatch.setattr(main_module, "crawl_institution", crawl_quality_sample)
+    run = client.post("/api/crawl-runs", json={"institution_ids": [1]})
+
+    assert run.status_code == 201
+    summary = client.get("/api/analytics/summary")
+    assert summary.status_code == 200
+    payload = summary.json()
+    assert payload["totals"]["parsers"] == 2
+    assert payload["totals"]["low_confidence_jobs"] == 1
+    assert payload["totals"]["attachment_sourced_jobs"] == 1
+    assert payload["totals"]["failed_attachment_events"] == 1
+
+    quality_by_parser = {item["parser_name"]: item for item in payload["parser_quality"]}
+    assert quality_by_parser["bjmu-xlsx-v1"]["jobs"] == 1
+    assert quality_by_parser["bjmu-xlsx-v1"]["attachment_sourced_jobs"] == 1
+    assert quality_by_parser["bjmu-xlsx-v1"]["average_confidence"] == 0.88
+    assert quality_by_parser["bjmu-xlsx-v1"]["review_status"] == "stable"
+    assert quality_by_parser["bjmu-notice-v1"]["low_confidence_jobs"] == 1
+    assert quality_by_parser["bjmu-notice-v1"]["failed_attachment_events"] == 1
+    assert quality_by_parser["bjmu-notice-v1"]["review_status"] == "review"
+
+
 def test_profile_resume_draft_truth_constraints_and_exports(tmp_path):
     client = make_client(tmp_path)
     client.post("/api/crawl-runs", json={"institution_ids": [1]})
@@ -302,3 +385,82 @@ def test_report_generation_contains_scope_and_sources(tmp_path):
     assert "样本范围" in payload["markdown"]
     assert "数据来源" in payload["markdown"]
     assert payload["html"].startswith("<!doctype html>")
+    assert "<h1>医疗岗位样本分析</h1>" in payload["html"]
+    assert "<h2>样本范围</h2>" in payload["html"]
+    assert "<ul>" in payload["html"]
+    assert "<li>" in payload["html"]
+
+
+def test_report_html_escapes_title_and_lines(tmp_path):
+    client = make_client(tmp_path)
+    client.post("/api/crawl-runs", json={"institution_ids": [1]})
+
+    report = client.post("/api/reports", json={"title": "<script>alert(1)</script>"})
+
+    assert report.status_code == 201
+    html = report.json()["html"]
+    assert "<script>" not in html
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html
+
+
+def test_profile_extended_collections_can_supply_resume_evidence(tmp_path):
+    client = make_client(tmp_path)
+    client.post("/api/crawl-runs", json={"institution_ids": [3]})
+    job = client.get("/api/jobs", params={"keyword": "教学"}).json()["items"][0]
+
+    profile_payload = {
+        "basic": {"name": "林晓", "phone": "13900000000", "email": "lin@example.com", "city": "南京"},
+        "education": [],
+        "experiences": [],
+        "projects": [],
+        "publications": [
+            {
+                "id": "pub-1",
+                "title": "公共卫生数据分析研究",
+                "journal": "中华公共卫生杂志",
+                "year": "2025",
+                "authors": "林晓等",
+            }
+        ],
+        "certificates": [],
+        "skills": [],
+        "teaching": [{"id": "teach-1", "course": "流行病学", "role": "助教", "institution": "复旦大学", "year": "2024"}],
+        "awards": [{"id": "award-1", "name": "教学优秀奖", "issuer": "复旦大学", "year": "2024", "level": "校级"}],
+        "languages": [],
+    }
+
+    saved = client.put("/api/profile", json=profile_payload)
+    assert saved.status_code == 200
+    draft = client.post("/api/resume-drafts", json={"job_id": job["id"]})
+
+    assert draft.status_code == 201
+    payload = draft.json()
+    section_ids = {section["id"] for section in payload["sections"]}
+    evidence_collections = {item["collection"] for item in payload["evidence"]}
+    assert {"publications", "teaching", "awards"} & section_ids
+    assert {"publications", "teaching", "awards"} & evidence_collections
+
+
+def test_pdf_export_accepts_chinese_resume_content(tmp_path):
+    client = make_client(tmp_path)
+    client.post("/api/crawl-runs", json={"institution_ids": [3]})
+    job = client.get("/api/jobs", params={"keyword": "教学"}).json()["items"][0]
+    profile_payload = {
+        "basic": {"name": "林晓", "phone": "13900000000", "email": "lin@example.com", "city": "南京"},
+        "education": [{"id": "edu-1", "school": "复旦大学", "degree": "博士", "major": "公共卫生"}],
+        "experiences": [],
+        "projects": [],
+        "publications": [{"id": "pub-1", "title": "教学与公共卫生数据分析", "journal": "医学教育", "year": "2025"}],
+        "certificates": [],
+        "skills": [{"id": "skill-1", "name": "教学"}, {"id": "skill-2", "name": "公共卫生"}],
+        "teaching": [{"id": "teach-1", "course": "流行病学", "role": "主讲", "institution": "复旦大学"}],
+        "awards": [{"id": "award-1", "name": "教学优秀奖", "issuer": "复旦大学"}],
+        "languages": [],
+    }
+    client.put("/api/profile", json=profile_payload)
+    draft = client.post("/api/resume-drafts", json={"job_id": job["id"]}).json()
+
+    pdf = client.post(f"/api/resume-drafts/{draft['id']}/export", params={"format": "pdf"})
+
+    assert pdf.status_code == 200
+    assert pdf.content.startswith(b"%PDF")
