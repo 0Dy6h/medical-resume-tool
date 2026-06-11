@@ -1,13 +1,22 @@
 import { ExternalLink, RefreshCcw, Search } from "lucide-react";
 import { useEffect, useState } from "react";
+import { useToast } from "../components/Toast";
 import { api } from "../lib/api";
 import { formatDate } from "../lib/format";
 import type { Job, JobDetail } from "../types";
 
+const EDUCATION_LEVELS = ["博士", "硕士", "本科", "大专"];
+
 export function JobsPage() {
   const PAGE_SIZE = 50;
+  const toast = useToast();
   const [keyword, setKeyword] = useState("");
   const [category, setCategory] = useState("");
+  const [region, setRegion] = useState("");
+  const [institutionType, setInstitutionType] = useState("");
+  const [education, setEducation] = useState("");
+  const [regions, setRegions] = useState<string[]>([]);
+  const [institutionTypes, setInstitutionTypes] = useState<string[]>([]);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(0);
@@ -20,6 +29,9 @@ export function JobsPage() {
       const payload = await api.jobs({
         keyword,
         job_category: category,
+        region,
+        institution_type: institutionType,
+        education,
         limit: PAGE_SIZE,
         offset: targetPage * PAGE_SIZE,
       });
@@ -29,6 +41,8 @@ export function JobsPage() {
       if (payload.items.length && !detail) {
         setDetail(await api.job(payload.items[0].id));
       }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "加载岗位失败");
     } finally {
       setLoading(false);
     }
@@ -39,11 +53,24 @@ export function JobsPage() {
   }
 
   async function selectJob(job: Job) {
-    setDetail(await api.job(job.id));
+    try {
+      setDetail(await api.job(job.id));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "加载岗位详情失败");
+    }
   }
 
   useEffect(() => {
     void refresh(0);
+    api
+      .analytics()
+      .then((summary) => {
+        setRegions(summary.regions.map((item) => item.name));
+        setInstitutionTypes(summary.institution_types.map((item) => item.name));
+      })
+      .catch(() => {
+        /* 筛选项加载失败不阻断岗位列表 */
+      });
   }, []);
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
@@ -71,6 +98,24 @@ export function JobsPage() {
               <option key={item} value={item}>{item}</option>
             ))}
           </select>
+          <select value={region} onChange={(event) => setRegion(event.target.value)}>
+            <option value="">全部地区</option>
+            {regions.map((item) => (
+              <option key={item} value={item}>{item}</option>
+            ))}
+          </select>
+          <select value={institutionType} onChange={(event) => setInstitutionType(event.target.value)}>
+            <option value="">全部机构类型</option>
+            {institutionTypes.map((item) => (
+              <option key={item} value={item}>{item}</option>
+            ))}
+          </select>
+          <select value={education} onChange={(event) => setEducation(event.target.value)}>
+            <option value="">全部学历</option>
+            {EDUCATION_LEVELS.map((item) => (
+              <option key={item} value={item}>{item}</option>
+            ))}
+          </select>
           <button className="icon-text-button" onClick={search}>
             <Search size={17} />
             查询
@@ -87,19 +132,27 @@ export function JobsPage() {
             </tr>
           </thead>
           <tbody>
-            {jobs.map((job) => (
-              <tr key={job.id} className={detail?.id === job.id ? "active-row" : ""} onClick={() => void selectJob(job)}>
-                <td><strong>{job.title}</strong></td>
-                <td>{job.institution_name}</td>
-                <td>{job.job_category}</td>
-                <td>{job.education}</td>
-                <td>
-                  <div className="tag-row">
-                    {job.tags.slice(0, 4).map((tag) => <span className="tag" key={tag}>{tag}</span>)}
-                  </div>
+            {jobs.length === 0 ? (
+              <tr>
+                <td colSpan={5} className="loading-line">
+                  {loading ? "加载中…" : "未找到匹配岗位"}
                 </td>
               </tr>
-            ))}
+            ) : (
+              jobs.map((job) => (
+                <tr key={job.id} className={detail?.id === job.id ? "active-row" : ""} onClick={() => void selectJob(job)}>
+                  <td><strong>{job.title}</strong></td>
+                  <td>{job.institution_name}</td>
+                  <td>{job.job_category}</td>
+                  <td>{job.education}</td>
+                  <td>
+                    <div className="tag-row">
+                      {job.tags.slice(0, 4).map((tag) => <span className="tag" key={tag}>{tag}</span>)}
+                    </div>
+                  </td>
+                </tr>
+              ))
+            )}
           </tbody>
         </table>
         {totalPages > 1 && (

@@ -81,6 +81,27 @@ def complete_crawl_run(
     return get_crawl_run(engine, run_id)
 
 
+def update_crawl_progress(
+    engine: DatabaseEngine,
+    run_id: int,
+    *,
+    success_count: int,
+    failure_count: int,
+    errors: list[dict[str, Any]],
+) -> None:
+    """Persist intermediate progress so polling clients can see live counts."""
+    with connect(engine) as conn:
+        conn.execute(
+            """
+            UPDATE crawl_runs
+            SET success_count = ?, failure_count = ?, error_summary = ?
+            WHERE id = ?
+            """,
+            (success_count, failure_count, to_json(errors), run_id),
+        )
+        conn.commit()
+
+
 def get_crawl_run(engine: DatabaseEngine, run_id: int) -> dict[str, Any]:
     with connect(engine) as conn:
         row = conn.execute("SELECT * FROM crawl_runs WHERE id = ?", (run_id,)).fetchone()

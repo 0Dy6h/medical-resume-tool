@@ -268,3 +268,63 @@ async def crawl_generic(institution: dict[str, Any]) -> list[ParsedJob]:
             )
         )
     return parsed
+
+
+def execute_crawl_run(
+    engine: Any,
+    run_id: int,
+    institutions: list[dict[str, Any]],
+    delay: float,
+) -> dict[str, Any]:
+    """Crawl the given institutions for a created run, updating progress incrementally.
+
+    Runs the async per-institution crawl synchronously (suitable for a background
+    thread). Persists success/failure counts after each institution so polling
+    clients can observe live progress, then finalizes the run.
+    """
+    from app.services.repositories import (
+        complete_crawl_run,
+        mark_institution,
+        update_crawl_progress,
+        upsert_job,
+    )
+
+    async def _run() -> dict[str, Any]:
+        success_count = 0
+        failure_count = 0
+        errors: list[dict[str, Any]] = []
+        for index, institution in enumerate(institutions):
+            try:
+                parsed_jobs = await crawl_institution(institution)
+                for parsed in parsed_jobs:
+                    upsert_job(engine, institution, parsed)
+                    success_count += 1
+                mark_institution(engine, institution["id"], "success")
+            except Exception as exc:  # pragma: no cover - exact network failures vary.
+                failure_count += 1
+                errors.append(
+                    {
+                        "institution_id": institution["id"],
+                        "institution": institution["name"],
+                        "error": str(exc),
+                    }
+                )
+                mark_institution(engine, institution["id"], "failed", str(exc))
+            update_crawl_progress(
+                engine,
+                run_id,
+                success_count=success_count,
+                failure_count=failure_count,
+                errors=errors,
+            )
+            if delay and index < len(institutions) - 1:
+                await asyncio.sleep(delay)
+        return complete_crawl_run(
+            engine,
+            run_id,
+            success_count=success_count,
+            failure_count=failure_count,
+            errors=errors,
+        )
+
+    return asyncio.run(_run())

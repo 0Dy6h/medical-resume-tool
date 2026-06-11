@@ -43,6 +43,7 @@ export const api = {
     return request<JobList>(`/api/jobs${query.toString() ? `?${query}` : ""}`);
   },
   job: (id: number) => request<JobDetail>(`/api/jobs/${id}`),
+  crawlRun: (id: number) => request<CrawlRun>(`/api/crawl-runs/${id}`),
   analytics: () => request<AnalyticsSummary>("/api/analytics/summary"),
   profile: () => request<Profile>("/api/profile"),
   saveProfile: (profile: Profile) =>

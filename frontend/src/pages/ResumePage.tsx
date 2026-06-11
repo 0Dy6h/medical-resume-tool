@@ -1,9 +1,11 @@
 import { Download, FileDown, RefreshCcw, Save, WandSparkles } from "lucide-react";
 import { useEffect, useState } from "react";
+import { useToast } from "../components/Toast";
 import { api, downloadBlob } from "../lib/api";
 import type { Job, ResumeDraft, ResumeSection } from "../types";
 
 export function ResumePage() {
+  const toast = useToast();
   const [jobs, setJobs] = useState<Job[]>([]);
   const [jobId, setJobId] = useState<number | "">("");
   const [draft, setDraft] = useState<ResumeDraft | null>(null);
@@ -12,9 +14,13 @@ export function ResumePage() {
   const [exporting, setExporting] = useState(false);
 
   async function refreshJobs() {
-    const payload = await api.jobs();
-    setJobs(payload.items);
-    if (!jobId && payload.items[0]) setJobId(payload.items[0].id);
+    try {
+      const payload = await api.jobs();
+      setJobs(payload.items);
+      if (!jobId && payload.items[0]) setJobId(payload.items[0].id);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "加载岗位失败");
+    }
   }
 
   useEffect(() => {
@@ -26,6 +32,9 @@ export function ResumePage() {
     setLoading(true);
     try {
       setDraft(await api.createResumeDraft(Number(jobId)));
+      toast.success("已生成简历草稿");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "生成失败");
     } finally {
       setLoading(false);
     }
@@ -46,6 +55,9 @@ export function ResumePage() {
       await saveDraft();
       const blob = await api.exportResume(draft.id, format);
       downloadBlob(blob, `resume-${draft.id}.${format}`);
+      toast.success(`已导出 ${format.toUpperCase()}`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "导出失败");
     } finally {
       setExporting(false);
     }

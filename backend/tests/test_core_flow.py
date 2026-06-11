@@ -1,11 +1,12 @@
 import io
+import time
 from pathlib import Path
 
 import httpx
 from fastapi.testclient import TestClient
 
-import app.main as main_module
 from app.main import create_app
+from app.services import crawler as crawler_module
 from app.services.crawler import ParsedJob
 from app.services.database import connect, init_db, reset_db
 
@@ -16,6 +17,25 @@ def make_client(tmp_path: Path) -> TestClient:
     reset_db(app.state.engine)
     init_db(app.state.engine)
     return TestClient(app)
+
+
+def wait_for_run(client: TestClient, run_id: int, timeout: float = 30.0) -> dict:
+    """Poll a crawl run until it reaches a terminal status."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        payload = client.get(f"/api/crawl-runs/{run_id}").json()
+        if payload["status"] in {"completed", "partial", "failed"}:
+            return payload
+        time.sleep(0.02)
+    raise AssertionError(f"crawl run {run_id} did not finish within {timeout}s")
+
+
+def crawl_and_wait(client: TestClient, institution_ids: list[int], timeout: float = 30.0) -> dict:
+    """Start a crawl run and block until it finishes, returning the final run payload."""
+    run = client.post("/api/crawl-runs", json={"institution_ids": institution_ids})
+    assert run.status_code == 201
+    assert run.json()["status"] == "running"
+    return wait_for_run(client, run.json()["id"], timeout)
 
 
 def test_health_and_seed_institutions(tmp_path):
@@ -35,9 +55,7 @@ def test_health_and_seed_institutions(tmp_path):
 def test_crawl_fixture_creates_tagged_jobs_without_duplicates(tmp_path):
     client = make_client(tmp_path)
 
-    run = client.post("/api/crawl-runs", json={"institution_ids": [1]})
-    assert run.status_code == 201
-    run_payload = run.json()
+    run_payload = crawl_and_wait(client, [1])
     assert run_payload["status"] == "completed"
     assert run_payload["success_count"] >= 3
 
@@ -50,8 +68,7 @@ def test_crawl_fixture_creates_tagged_jobs_without_duplicates(tmp_path):
     assert first["source_text_hash"]
     assert "护理" in first["tags"]
 
-    rerun = client.post("/api/crawl-runs", json={"institution_ids": [1]})
-    assert rerun.status_code == 201
+    crawl_and_wait(client, [1])
     after = client.get("/api/jobs").json()
     assert after["total"] == payload["total"] or after["total"] >= payload["total"]
     urls = [item["source_url"] for item in after["items"]]
@@ -89,10 +106,8 @@ def test_crawl_retries_timeout_then_persists_jobs(tmp_path, monkeypatch):
 
     monkeypatch.setattr(httpx.AsyncClient, "get", flaky_get)
 
-    run = client.post("/api/crawl-runs", json={"institution_ids": [1]})
+    payload = crawl_and_wait(client, [1])
 
-    assert run.status_code == 201
-    payload = run.json()
     assert payload["status"] == "completed"
     assert payload["failure_count"] == 0
     assert payload["success_count"] == 1
@@ -122,15 +137,33 @@ def test_crawl_run_reports_partial_status_and_errors(tmp_path, monkeypatch):
 
     monkeypatch.setattr(httpx.AsyncClient, "get", failing_get)
 
-    run = client.post("/api/crawl-runs", json={"institution_ids": [1, 2]})
+    payload = crawl_and_wait(client, [1, 2])
 
-    assert run.status_code == 201
-    payload = run.json()
     assert payload["status"] == "partial"
     assert payload["failure_count"] == 1
     assert payload["success_count"] >= 3
     assert payload["errors"] == payload["error_summary"]
     assert payload["errors"][0]["institution_id"] == 2
+
+
+def test_execute_crawl_run_updates_progress_incrementally(tmp_path, monkeypatch):
+    monkeypatch.setenv("CRAWL_DELAY_SECONDS", "0")
+    client = make_client(tmp_path)
+    engine = client.app.state.engine
+
+    from app.services.crawler import execute_crawl_run
+    from app.services.repositories import create_crawl_run, get_institutions_by_ids
+
+    institutions = get_institutions_by_ids(engine, [1])
+    run_id = create_crawl_run(engine, [item["id"] for item in institutions])
+
+    final = execute_crawl_run(engine, run_id, institutions, delay=0)
+
+    assert final["status"] == "completed"
+    assert final["success_count"] >= 3
+    persisted = client.get(f"/api/crawl-runs/{run_id}").json()
+    assert persisted["status"] == "completed"
+    assert persisted["success_count"] == final["success_count"]
 
 
 def test_crawl_deduplicates_by_source_text_hash_and_refreshes_fetched_at(tmp_path, monkeypatch):
@@ -170,13 +203,11 @@ def test_crawl_deduplicates_by_source_text_hash_and_refreshes_fetched_at(tmp_pat
             )
         ]
 
-    monkeypatch.setattr(main_module, "crawl_institution", crawl_same_text_different_url)
+    monkeypatch.setattr(crawler_module, "crawl_institution", crawl_same_text_different_url)
 
-    first_run = client.post("/api/crawl-runs", json={"institution_ids": [1]})
-    second_run = client.post("/api/crawl-runs", json={"institution_ids": [1]})
+    crawl_and_wait(client, [1])
+    crawl_and_wait(client, [1])
 
-    assert first_run.status_code == 201
-    assert second_run.status_code == 201
     jobs = client.get("/api/jobs").json()
     assert jobs["total"] == 1
     assert jobs["items"][0]["source_url"] == "https://example.test/jobs/1"
@@ -192,18 +223,17 @@ def test_crawl_defaults_to_one_second_delay_between_institutions(tmp_path, monke
     async def record_sleep(seconds):  # noqa: ANN001
         sleep_calls.append(seconds)
 
-    monkeypatch.setattr(main_module.asyncio, "sleep", record_sleep)
+    monkeypatch.setattr(crawler_module.asyncio, "sleep", record_sleep)
 
-    run = client.post("/api/crawl-runs", json={"institution_ids": [1, 2]})
+    payload = crawl_and_wait(client, [1, 2])
 
-    assert run.status_code == 201
-    assert run.json()["status"] == "completed"
+    assert payload["status"] == "completed"
     assert sleep_calls == [1.0]
 
 
 def test_job_detail_and_analytics_summary(tmp_path):
     client = make_client(tmp_path)
-    client.post("/api/crawl-runs", json={"institution_ids": [1, 2, 3]})
+    crawl_and_wait(client, [1, 2, 3])
 
     jobs = client.get("/api/jobs").json()["items"]
     detail = client.get(f"/api/jobs/{jobs[0]['id']}")
@@ -282,10 +312,9 @@ def test_analytics_summary_surfaces_parser_quality_review(tmp_path, monkeypatch)
             ),
         ]
 
-    monkeypatch.setattr(main_module, "crawl_institution", crawl_quality_sample)
-    run = client.post("/api/crawl-runs", json={"institution_ids": [1]})
+    monkeypatch.setattr(crawler_module, "crawl_institution", crawl_quality_sample)
+    crawl_and_wait(client, [1])
 
-    assert run.status_code == 201
     summary = client.get("/api/analytics/summary")
     assert summary.status_code == 200
     payload = summary.json()
@@ -306,7 +335,7 @@ def test_analytics_summary_surfaces_parser_quality_review(tmp_path, monkeypatch)
 
 def test_profile_resume_draft_truth_constraints_and_exports(tmp_path):
     client = make_client(tmp_path)
-    client.post("/api/crawl-runs", json={"institution_ids": [1]})
+    crawl_and_wait(client, [1])
     job = client.get("/api/jobs", params={"keyword": "科研"}).json()["items"][0]
 
     empty_draft = client.post("/api/resume-drafts", json={"job_id": job["id"]})
@@ -379,7 +408,7 @@ def test_profile_resume_draft_truth_constraints_and_exports(tmp_path):
 
 def test_report_generation_contains_scope_and_sources(tmp_path):
     client = make_client(tmp_path)
-    client.post("/api/crawl-runs", json={"institution_ids": [1, 2]})
+    crawl_and_wait(client, [1, 2])
 
     report = client.post("/api/reports", json={"title": "医疗岗位样本分析"})
     assert report.status_code == 201
@@ -396,7 +425,7 @@ def test_report_generation_contains_scope_and_sources(tmp_path):
 
 def test_report_html_escapes_title_and_lines(tmp_path):
     client = make_client(tmp_path)
-    client.post("/api/crawl-runs", json={"institution_ids": [1]})
+    crawl_and_wait(client, [1])
 
     report = client.post("/api/reports", json={"title": "<script>alert(1)</script>"})
 
@@ -408,7 +437,7 @@ def test_report_html_escapes_title_and_lines(tmp_path):
 
 def test_profile_extended_collections_can_supply_resume_evidence(tmp_path):
     client = make_client(tmp_path)
-    client.post("/api/crawl-runs", json={"institution_ids": [3]})
+    crawl_and_wait(client, [3])
     job = client.get("/api/jobs", params={"keyword": "教学"}).json()["items"][0]
 
     profile_payload = {
@@ -445,7 +474,7 @@ def test_profile_extended_collections_can_supply_resume_evidence(tmp_path):
 
 def test_pdf_export_accepts_chinese_resume_content(tmp_path):
     client = make_client(tmp_path)
-    client.post("/api/crawl-runs", json={"institution_ids": [3]})
+    crawl_and_wait(client, [3])
     job = client.get("/api/jobs", params={"keyword": "教学"}).json()["items"][0]
     profile_payload = {
         "education": [{"id": "edu-1", "school": "复旦大学", "degree": "博士", "major": "公共卫生"}],

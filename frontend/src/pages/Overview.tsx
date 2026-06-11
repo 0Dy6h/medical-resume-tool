@@ -1,5 +1,6 @@
 import { Activity, BriefcaseBusiness, Building2, MapPinned, RefreshCcw } from "lucide-react";
 import { useEffect, useState } from "react";
+import { useToast } from "../components/Toast";
 import { api } from "../lib/api";
 import { formatDate } from "../lib/format";
 import type { AnalyticsSummary, Job } from "../types";
@@ -9,6 +10,7 @@ type OverviewProps = {
 };
 
 export function Overview({ onNavigate }: OverviewProps) {
+  const toast = useToast();
   const [summary, setSummary] = useState<AnalyticsSummary | null>(null);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(false);
@@ -19,6 +21,8 @@ export function Overview({ onNavigate }: OverviewProps) {
       const [summaryPayload, jobsPayload] = await Promise.all([api.analytics(), api.jobs()]);
       setSummary(summaryPayload);
       setJobs(jobsPayload.items.slice(0, 6));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "加载总览数据失败");
     } finally {
       setLoading(false);
     }

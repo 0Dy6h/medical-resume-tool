@@ -37,6 +37,7 @@ def connect(engine: DatabaseEngine) -> sqlite3.Connection:
     conn = sqlite3.connect(engine.path, check_same_thread=False, factory=ClosingConnection)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA busy_timeout = 5000")
     return conn
 
 

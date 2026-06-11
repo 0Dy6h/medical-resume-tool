@@ -2,13 +2,16 @@ import { FileText, RefreshCcw } from "lucide-react";
 import { useEffect, useState } from "react";
 import { DataBar } from "../components/DataBar";
 import { StatusPill } from "../components/StatusPill";
+import { useToast } from "../components/Toast";
 import { api } from "../lib/api";
 import type { AnalyticsSummary, Report } from "../types";
 
 export function AnalyticsPage() {
+  const toast = useToast();
   const [summary, setSummary] = useState<AnalyticsSummary | null>(null);
   const [report, setReport] = useState<Report | null>(null);
   const [loading, setLoading] = useState(false);
+  const [reporting, setReporting] = useState(false);
   const parserQuality = summary?.parser_quality ?? [];
   const reviewParserCount = parserQuality.filter((item) => item.review_status === "review").length;
 
@@ -16,13 +19,23 @@ export function AnalyticsPage() {
     setLoading(true);
     try {
       setSummary(await api.analytics());
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "加载分析数据失败");
     } finally {
       setLoading(false);
     }
   }
 
   async function createReport() {
-    setReport(await api.createReport("医疗岗位样本分析"));
+    setReporting(true);
+    try {
+      setReport(await api.createReport("医疗岗位样本分析"));
+      toast.success("已生成分析报告");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "生成报告失败");
+    } finally {
+      setReporting(false);
+    }
   }
 
   useEffect(() => {
@@ -41,9 +54,9 @@ export function AnalyticsPage() {
             <RefreshCcw size={17} />
             刷新
           </button>
-          <button className="primary-button" onClick={createReport}>
+          <button className="primary-button" onClick={createReport} disabled={reporting}>
             <FileText size={17} />
-            报告
+            {reporting ? "生成中…" : "报告"}
           </button>
         </div>
       </div>

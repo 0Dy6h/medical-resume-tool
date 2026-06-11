@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import asyncio
 import os
+import threading
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, UploadFile
@@ -24,12 +24,11 @@ from app.schemas import (
     ResumeDraftUpdate,
 )
 from app.services.analytics import analytics_summary, generate_report
-from app.services.crawler import crawl_institution
+from app.services.crawler import execute_crawl_run
 from app.services.database import DatabaseEngine, create_engine, init_db
 from app.services.exporter import export_docx, export_pdf
 from app.services.profile_import import extract_docx_text, parse_profile_from_lines
 from app.services.repositories import (
-    complete_crawl_run,
     create_crawl_run,
     get_crawl_run,
     get_institutions_by_ids,
@@ -38,10 +37,8 @@ from app.services.repositories import (
     get_resume_draft,
     list_institutions,
     list_jobs,
-    mark_institution,
     save_profile,
     update_resume_draft_sections,
-    upsert_job,
     create_resume_draft as persist_resume_draft,
 )
 from app.services.resume import PROFILE_COLLECTIONS, generate_resume_draft
@@ -72,37 +69,19 @@ def create_app(database_url: str | None = None) -> FastAPI:
         return list_institutions(engine)
 
     @app.post("/api/crawl-runs", response_model=CrawlRunOut, status_code=201)
-    async def start_crawl(payload: CrawlRunCreate, engine: Annotated[DatabaseEngine, Depends(get_engine)]) -> dict:
+    def start_crawl(payload: CrawlRunCreate, engine: Annotated[DatabaseEngine, Depends(get_engine)]) -> dict:
         from app.config import config
         institutions_to_crawl = get_institutions_by_ids(engine, payload.institution_ids)
         if not institutions_to_crawl:
             raise HTTPException(status_code=404, detail="没有找到可抓取的机构")
         run_id = create_crawl_run(engine, [item["id"] for item in institutions_to_crawl])
-        success_count = 0
-        failure_count = 0
-        errors = []
-        delay = config.crawl_delay_seconds
-        for index, institution in enumerate(institutions_to_crawl):
-            try:
-                parsed_jobs = await crawl_institution(institution)
-                for parsed in parsed_jobs:
-                    upsert_job(engine, institution, parsed)
-                    success_count += 1
-                mark_institution(engine, institution["id"], "success")
-            except Exception as exc:  # pragma: no cover - exact network failures vary.
-                failure_count += 1
-                message = str(exc)
-                errors.append({"institution_id": institution["id"], "institution": institution["name"], "error": message})
-                mark_institution(engine, institution["id"], "failed", message)
-            if delay and index < len(institutions_to_crawl) - 1:
-                await asyncio.sleep(delay)
-        return complete_crawl_run(
-            engine,
-            run_id,
-            success_count=success_count,
-            failure_count=failure_count,
-            errors=errors,
+        thread = threading.Thread(
+            target=execute_crawl_run,
+            args=(engine, run_id, institutions_to_crawl, config.crawl_delay_seconds),
+            daemon=True,
         )
+        thread.start()
+        return get_crawl_run(engine, run_id)
 
     @app.get("/api/crawl-runs/{run_id}", response_model=CrawlRunOut)
     def crawl_run(run_id: int, engine: Annotated[DatabaseEngine, Depends(get_engine)]) -> dict:

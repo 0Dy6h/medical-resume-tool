@@ -1,5 +1,6 @@
 import { FileUp, Plus, Save, Sparkles, Trash2 } from "lucide-react";
 import { useRef, useEffect, useState } from "react";
+import { useToast } from "../components/Toast";
 import { api } from "../lib/api";
 import { demoProfile, emptyProfile } from "../lib/defaultProfile";
 import type { Profile, ProfileImportResult } from "../types";
@@ -121,12 +122,12 @@ function toStoredValue(value: string, area?: boolean) {
 }
 
 export function ProfilePage() {
+  const toast = useToast();
   const [profile, setProfile] = useState<Profile>(emptyProfile);
   const [saved, setSaved] = useState(false);
   const [preview, setPreview] = useState<ProfileImportResult | null>(null);
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
   const [importing, setImporting] = useState(false);
-  const [importError, setImportError] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -134,9 +135,14 @@ export function ProfilePage() {
   }, []);
 
   async function save() {
-    await api.saveProfile(profile);
-    setSaved(true);
-    window.setTimeout(() => setSaved(false), 1600);
+    try {
+      await api.saveProfile(profile);
+      setSaved(true);
+      toast.success("履历已保存");
+      window.setTimeout(() => setSaved(false), 1600);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "保存失败");
+    }
   }
 
   async function handleImportFile(event: React.ChangeEvent<HTMLInputElement>) {
@@ -144,7 +150,6 @@ export function ProfilePage() {
     event.target.value = "";
     if (!file) return;
     setImporting(true);
-    setImportError("");
     try {
       const result = await api.importProfile(file);
       const keys = new Set<string>();
@@ -155,8 +160,11 @@ export function ProfilePage() {
       });
       setPreview(result);
       setSelectedKeys(keys);
+      if (keys.size === 0) {
+        toast.info("未识别出可导入的条目，请检查文档结构");
+      }
     } catch (error) {
-      setImportError(error instanceof Error ? error.message : "导入失败");
+      toast.error(error instanceof Error ? error.message : "导入失败");
     } finally {
       setImporting(false);
     }
@@ -173,6 +181,7 @@ export function ProfilePage() {
 
   function confirmImport() {
     if (!preview) return;
+    let count = 0;
     setProfile((current) => {
       const next = { ...current };
       configs.forEach((config) => {
@@ -181,12 +190,14 @@ export function ProfilePage() {
           .filter((_, index) => selectedKeys.has(`${String(config.key)}-${index}`))
           .map((item) => ({ ...item, id: newId(String(config.key)) }));
         if (accepted.length) {
+          count += accepted.length;
           next[config.key] = [...((current[config.key] as Array<Record<string, unknown>>) ?? []), ...accepted] as never;
         }
       });
       return next;
     });
     setPreview(null);
+    toast.success(`已导入 ${count} 条，请检查后保存`);
   }
 
   function previewItemSummary(config: CollectionConfig, item: Record<string, unknown>) {
@@ -253,8 +264,6 @@ export function ProfilePage() {
           </button>
         </div>
       </div>
-
-      {importError && <div className="error-strip">{importError}</div>}
 
       {preview && (
         <section className="panel form-panel">
