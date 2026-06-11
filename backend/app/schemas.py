@@ -5,6 +5,21 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 
+class RegisterPayload(BaseModel):
+    username: str = Field(min_length=2, max_length=32)
+    password: str = Field(min_length=6, max_length=128)
+
+
+class LoginPayload(BaseModel):
+    username: str = Field(min_length=1, max_length=32)
+    password: str = Field(min_length=1, max_length=128)
+
+
+class AuthOut(BaseModel):
+    token: str
+    username: str
+
+
 class InstitutionOut(BaseModel):
     id: int
     name: str

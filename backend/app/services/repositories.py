@@ -263,24 +263,51 @@ def get_job(engine: DatabaseEngine, job_id: int) -> dict[str, Any]:
     return _inflate_job(dict(row))
 
 
-def save_profile(engine: DatabaseEngine, profile: dict[str, Any]) -> dict[str, Any]:
+def create_user(engine: DatabaseEngine, username: str, password_hash: str, password_salt: str) -> dict[str, Any]:
+    created = now_iso()
+    with connect(engine) as conn:
+        existing = conn.execute("SELECT id FROM users WHERE username = ?", (username,)).fetchone()
+        if existing is not None:
+            raise ValueError("username already exists")
+        cur = conn.execute(
+            "INSERT INTO users (username, password_hash, password_salt, created_at) VALUES (?, ?, ?, ?)",
+            (username, password_hash, password_salt, created),
+        )
+        conn.commit()
+        user_id = int(cur.lastrowid)
+    return {"id": user_id, "username": username, "created_at": created}
+
+
+def get_user_by_username(engine: DatabaseEngine, username: str) -> dict[str, Any] | None:
+    with connect(engine) as conn:
+        row = conn.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
+    return dict(row) if row is not None else None
+
+
+def get_user_by_id(engine: DatabaseEngine, user_id: int) -> dict[str, Any] | None:
+    with connect(engine) as conn:
+        row = conn.execute("SELECT id, username, created_at FROM users WHERE id = ?", (user_id,)).fetchone()
+    return dict(row) if row is not None else None
+
+
+def save_profile(engine: DatabaseEngine, user_id: int, profile: dict[str, Any]) -> dict[str, Any]:
     updated = now_iso()
     with connect(engine) as conn:
         conn.execute(
             """
-            INSERT INTO profiles (id, data, updated_at)
-            VALUES ('default', ?, ?)
-            ON CONFLICT(id) DO UPDATE SET data=excluded.data, updated_at=excluded.updated_at
+            INSERT INTO profiles (user_id, data, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET data=excluded.data, updated_at=excluded.updated_at
             """,
-            (to_json(profile), updated),
+            (user_id, to_json(profile), updated),
         )
         conn.commit()
     return {**profile, "updated_at": updated}
 
 
-def get_profile(engine: DatabaseEngine) -> dict[str, Any]:
+def get_profile(engine: DatabaseEngine, user_id: int) -> dict[str, Any]:
     with connect(engine) as conn:
-        row = conn.execute("SELECT data, updated_at FROM profiles WHERE id = 'default'").fetchone()
+        row = conn.execute("SELECT data, updated_at FROM profiles WHERE user_id = ?", (user_id,)).fetchone()
     if row is None:
         return {
             "education": [],
@@ -300,41 +327,47 @@ def get_profile(engine: DatabaseEngine) -> dict[str, Any]:
     return data
 
 
-def create_resume_draft(engine: DatabaseEngine, job_id: int, title: str, sections: list[dict[str, Any]], evidence: list[dict[str, Any]], gaps: list[dict[str, Any]]) -> dict[str, Any]:
+def create_resume_draft(engine: DatabaseEngine, user_id: int, job_id: int, title: str, sections: list[dict[str, Any]], evidence: list[dict[str, Any]], gaps: list[dict[str, Any]]) -> dict[str, Any]:
     created = now_iso()
     with connect(engine) as conn:
         cur = conn.execute(
             """
-            INSERT INTO resume_drafts (job_id, profile_id, title, sections, evidence, gaps, created_at, updated_at)
-            VALUES (?, 'default', ?, ?, ?, ?, ?, ?)
+            INSERT INTO resume_drafts (user_id, job_id, title, sections, evidence, gaps, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (job_id, title, to_json(sections), to_json(evidence), to_json(gaps), created, created),
+            (user_id, job_id, title, to_json(sections), to_json(evidence), to_json(gaps), created, created),
         )
         conn.commit()
         draft_id = int(cur.lastrowid)
-    return get_resume_draft(engine, draft_id)
+    return get_resume_draft(engine, user_id, draft_id)
 
 
-def get_resume_draft(engine: DatabaseEngine, draft_id: int) -> dict[str, Any]:
+def get_resume_draft(engine: DatabaseEngine, user_id: int, draft_id: int) -> dict[str, Any]:
     with connect(engine) as conn:
-        row = conn.execute("SELECT * FROM resume_drafts WHERE id = ?", (draft_id,)).fetchone()
+        row = conn.execute(
+            "SELECT * FROM resume_drafts WHERE id = ? AND user_id = ?",
+            (draft_id, user_id),
+        ).fetchone()
     if row is None:
         raise KeyError(draft_id)
     item = dict(row)
+    item["profile_id"] = str(item["user_id"])
     item["sections"] = from_json(item["sections"], [])
     item["evidence"] = from_json(item["evidence"], [])
     item["gaps"] = from_json(item["gaps"], [])
     return item
 
 
-def update_resume_draft_sections(engine: DatabaseEngine, draft_id: int, sections: list[dict[str, Any]]) -> dict[str, Any]:
+def update_resume_draft_sections(engine: DatabaseEngine, user_id: int, draft_id: int, sections: list[dict[str, Any]]) -> dict[str, Any]:
     with connect(engine) as conn:
-        conn.execute(
-            "UPDATE resume_drafts SET sections = ?, updated_at = ? WHERE id = ?",
-            (to_json(sections), now_iso(), draft_id),
+        cur = conn.execute(
+            "UPDATE resume_drafts SET sections = ?, updated_at = ? WHERE id = ? AND user_id = ?",
+            (to_json(sections), now_iso(), draft_id, user_id),
         )
         conn.commit()
-    return get_resume_draft(engine, draft_id)
+        if cur.rowcount == 0:
+            raise KeyError(draft_id)
+    return get_resume_draft(engine, user_id, draft_id)
 
 
 def save_report(engine: DatabaseEngine, title: str, markdown: str, html: str, filters: dict[str, Any]) -> dict[str, Any]:

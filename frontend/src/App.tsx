@@ -5,12 +5,15 @@ import {
   DatabaseZap,
   FileText,
   LayoutDashboard,
+  LogOut,
   UserRound
 } from "lucide-react";
 import { useMemo, useState } from "react";
+import { useAuth } from "./components/AuthContext";
 import { AnalyticsPage } from "./pages/AnalyticsPage";
 import { CrawlPage } from "./pages/CrawlPage";
 import { JobsPage } from "./pages/JobsPage";
+import { LoginPage } from "./pages/LoginPage";
 import { Overview } from "./pages/Overview";
 import { ProfilePage } from "./pages/ProfilePage";
 import { ResumePage } from "./pages/ResumePage";
@@ -27,8 +30,13 @@ const pages = [
 ] satisfies Array<{ id: PageId; label: string; icon: typeof LayoutDashboard }>;
 
 export default function App() {
+  const auth = useAuth();
   const [active, setActive] = useState<PageId>("overview");
   const activePage = useMemo(() => pages.find((page) => page.id === active) ?? pages[0], [active]);
+
+  if (!auth.token) {
+    return <LoginPage />;
+  }
 
   return (
     <div className="app-shell">
@@ -51,6 +59,16 @@ export default function App() {
             );
           })}
         </nav>
+        <div className="sidebar-footer">
+          <div className="sidebar-user">
+            <UserRound size={16} />
+            <span>{auth.username}</span>
+          </div>
+          <button className="nav-item logout" onClick={auth.logout}>
+            <LogOut size={18} />
+            <span>退出登录</span>
+          </button>
+        </div>
       </aside>
       <main className="main-workspace">
         <header className="topbar">

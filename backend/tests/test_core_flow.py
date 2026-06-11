@@ -38,6 +38,13 @@ def crawl_and_wait(client: TestClient, institution_ids: list[int], timeout: floa
     return wait_for_run(client, run.json()["id"], timeout)
 
 
+def auth_headers(client: TestClient, username: str = "tester", password: str = "secret123") -> dict[str, str]:
+    """Register a fresh user and return an Authorization header for private endpoints."""
+    response = client.post("/api/auth/register", json={"username": username, "password": password})
+    assert response.status_code == 201, response.text
+    return {"Authorization": f"Bearer {response.json()['token']}"}
+
+
 def test_health_and_seed_institutions(tmp_path):
     client = make_client(tmp_path)
 
@@ -335,10 +342,11 @@ def test_analytics_summary_surfaces_parser_quality_review(tmp_path, monkeypatch)
 
 def test_profile_resume_draft_truth_constraints_and_exports(tmp_path):
     client = make_client(tmp_path)
+    auth = auth_headers(client)
     crawl_and_wait(client, [1])
     job = client.get("/api/jobs", params={"keyword": "科研"}).json()["items"][0]
 
-    empty_draft = client.post("/api/resume-drafts", json={"job_id": job["id"]})
+    empty_draft = client.post("/api/resume-drafts", json={"job_id": job["id"]}, headers=auth)
     assert empty_draft.status_code == 400
     assert "请先填写或导入履历内容" in empty_draft.text
 
@@ -381,10 +389,10 @@ def test_profile_resume_draft_truth_constraints_and_exports(tmp_path):
         "awards": [],
         "languages": [{"id": "lang-1", "name": "英语", "level": "CET-6"}],
     }
-    saved = client.put("/api/profile", json=profile_payload)
+    saved = client.put("/api/profile", json=profile_payload, headers=auth)
     assert saved.status_code == 200
 
-    draft = client.post("/api/resume-drafts", json={"job_id": job["id"]})
+    draft = client.post("/api/resume-drafts", json={"job_id": job["id"]}, headers=auth)
     assert draft.status_code == 201
     draft_payload = draft.json()
     assert draft_payload["job_id"] == job["id"]
@@ -393,14 +401,14 @@ def test_profile_resume_draft_truth_constraints_and_exports(tmp_path):
     assert all(item["profile_field_id"] for item in draft_payload["evidence"])
     assert all("未在你的履历中找到对应证据" in gap["message"] for gap in draft_payload["gaps"])
 
-    docx = client.post(f"/api/resume-drafts/{draft_payload['id']}/export", params={"format": "docx"})
+    docx = client.post(f"/api/resume-drafts/{draft_payload['id']}/export", params={"format": "docx"}, headers=auth)
     assert docx.status_code == 200
     assert docx.headers["content-type"].startswith(
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     )
     assert io.BytesIO(docx.content).getbuffer().nbytes > 1000
 
-    pdf = client.post(f"/api/resume-drafts/{draft_payload['id']}/export", params={"format": "pdf"})
+    pdf = client.post(f"/api/resume-drafts/{draft_payload['id']}/export", params={"format": "pdf"}, headers=auth)
     assert pdf.status_code == 200
     assert pdf.headers["content-type"].startswith("application/pdf")
     assert pdf.content.startswith(b"%PDF")
@@ -437,6 +445,7 @@ def test_report_html_escapes_title_and_lines(tmp_path):
 
 def test_profile_extended_collections_can_supply_resume_evidence(tmp_path):
     client = make_client(tmp_path)
+    auth = auth_headers(client)
     crawl_and_wait(client, [3])
     job = client.get("/api/jobs", params={"keyword": "教学"}).json()["items"][0]
 
@@ -460,9 +469,9 @@ def test_profile_extended_collections_can_supply_resume_evidence(tmp_path):
         "languages": [],
     }
 
-    saved = client.put("/api/profile", json=profile_payload)
+    saved = client.put("/api/profile", json=profile_payload, headers=auth)
     assert saved.status_code == 200
-    draft = client.post("/api/resume-drafts", json={"job_id": job["id"]})
+    draft = client.post("/api/resume-drafts", json={"job_id": job["id"]}, headers=auth)
 
     assert draft.status_code == 201
     payload = draft.json()
@@ -474,6 +483,7 @@ def test_profile_extended_collections_can_supply_resume_evidence(tmp_path):
 
 def test_pdf_export_accepts_chinese_resume_content(tmp_path):
     client = make_client(tmp_path)
+    auth = auth_headers(client)
     crawl_and_wait(client, [3])
     job = client.get("/api/jobs", params={"keyword": "教学"}).json()["items"][0]
     profile_payload = {
@@ -487,10 +497,10 @@ def test_pdf_export_accepts_chinese_resume_content(tmp_path):
         "awards": [{"id": "award-1", "name": "教学优秀奖", "issuer": "复旦大学"}],
         "languages": [],
     }
-    client.put("/api/profile", json=profile_payload)
-    draft = client.post("/api/resume-drafts", json={"job_id": job["id"]}).json()
+    client.put("/api/profile", json=profile_payload, headers=auth)
+    draft = client.post("/api/resume-drafts", json={"job_id": job["id"]}, headers=auth).json()
 
-    pdf = client.post(f"/api/resume-drafts/{draft['id']}/export", params={"format": "pdf"})
+    pdf = client.post(f"/api/resume-drafts/{draft['id']}/export", params={"format": "pdf"}, headers=auth)
 
     assert pdf.status_code == 200
     assert pdf.content.startswith(b"%PDF")

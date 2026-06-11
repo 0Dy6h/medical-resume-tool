@@ -61,6 +61,8 @@ a:hover {
   color: #edf5f0;
   padding: 22px 16px;
   border-right: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  flex-direction: column;
 }
 
 .brand {
@@ -979,4 +981,70 @@ pre {
   text-align: center;
   color: var(--muted);
   font-size: 13px;
+}
+
+/* Sidebar footer: user info + logout */
+.sidebar-footer {
+  margin-top: auto;
+  padding-top: 16px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  display: grid;
+  gap: 6px;
+}
+
+.sidebar-user {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 11px;
+  min-height: 32px;
+  color: #a9bbb4;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.nav-item.logout {
+  cursor: pointer;
+}
+
+.nav-item.logout:hover {
+  background: #3a2624;
+  color: #ffd9d4;
+}
+
+/* Login / register screen */
+.auth-screen {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  background: var(--bg);
+  padding: 24px;
+}
+
+.auth-card {
+  width: 100%;
+  max-width: 380px;
+  display: grid;
+  gap: 18px;
+}
+
+.auth-head h1 {
+  margin: 0 0 4px;
+  font-size: 19px;
+}
+
+.auth-submit {
+  width: 100%;
+  justify-content: center;
+}
+
+.auth-switch {
+  justify-self: center;
+}
+
+.auth-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
 }

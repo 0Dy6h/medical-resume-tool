@@ -17,6 +17,12 @@ def make_client(tmp_path: Path) -> TestClient:
     return TestClient(app)
 
 
+def auth_headers(client: TestClient) -> dict[str, str]:
+    response = client.post("/api/auth/register", json={"username": "tester", "password": "secret123"})
+    assert response.status_code == 201, response.text
+    return {"Authorization": f"Bearer {response.json()['token']}"}
+
+
 def sample_resume_docx() -> bytes:
     document = Document()
     document.add_heading("教育经历", level=1)
@@ -94,9 +100,11 @@ def test_parse_profile_warns_on_unrecognized_document():
 
 def test_import_endpoint_returns_parsed_profile(tmp_path):
     client = make_client(tmp_path)
+    auth = auth_headers(client)
     response = client.post(
         "/api/profile/import",
         files={"file": ("resume.docx", sample_resume_docx(), "application/vnd.openxmlformats-officedocument.wordprocessingml.document")},
+        headers=auth,
     )
     assert response.status_code == 200
     payload = response.json()
@@ -105,17 +113,29 @@ def test_import_endpoint_returns_parsed_profile(tmp_path):
     assert "warnings" in payload
 
 
+def test_import_endpoint_requires_auth(tmp_path):
+    client = make_client(tmp_path)
+    response = client.post(
+        "/api/profile/import",
+        files={"file": ("resume.docx", sample_resume_docx(), "application/vnd.openxmlformats-officedocument.wordprocessingml.document")},
+    )
+    assert response.status_code == 401
+
+
 def test_import_endpoint_rejects_non_docx(tmp_path):
     client = make_client(tmp_path)
-    response = client.post("/api/profile/import", files={"file": ("resume.pdf", b"%PDF-1.4", "application/pdf")})
+    auth = auth_headers(client)
+    response = client.post("/api/profile/import", files={"file": ("resume.pdf", b"%PDF-1.4", "application/pdf")}, headers=auth)
     assert response.status_code == 400
     assert "docx" in response.text
 
 
 def test_import_endpoint_rejects_corrupt_docx(tmp_path):
     client = make_client(tmp_path)
+    auth = auth_headers(client)
     response = client.post(
         "/api/profile/import",
         files={"file": ("resume.docx", b"not a real docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")},
+        headers=auth,
     )
     assert response.status_code == 400

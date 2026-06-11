@@ -4,19 +4,22 @@ import os
 import threading
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, UploadFile
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.schemas import (
     AnalyticsSummary,
+    AuthOut,
     CrawlRunCreate,
     CrawlRunOut,
     ExportFormat,
     InstitutionOut,
     JobDetailOut,
     JobListOut,
+    LoginPayload,
     ProfileImportOut,
     ProfilePayload,
+    RegisterPayload,
     ReportCreate,
     ReportOut,
     ResumeDraftCreate,
@@ -24,17 +27,21 @@ from app.schemas import (
     ResumeDraftUpdate,
 )
 from app.services.analytics import analytics_summary, generate_report
+from app.services.auth import hash_password, make_token, verify_password, verify_token
 from app.services.crawler import execute_crawl_run
 from app.services.database import DatabaseEngine, create_engine, init_db
 from app.services.exporter import export_docx, export_pdf
 from app.services.profile_import import extract_docx_text, parse_profile_from_lines
 from app.services.repositories import (
     create_crawl_run,
+    create_user,
     get_crawl_run,
     get_institutions_by_ids,
     get_job,
     get_profile,
     get_resume_draft,
+    get_user_by_id,
+    get_user_by_username,
     list_institutions,
     list_jobs,
     save_profile,
@@ -63,6 +70,26 @@ def create_app(database_url: str | None = None) -> FastAPI:
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.post("/api/auth/register", response_model=AuthOut, status_code=201)
+    def register(payload: RegisterPayload, engine: Annotated[DatabaseEngine, Depends(get_engine)]) -> dict:
+        password_hash, password_salt = hash_password(payload.password)
+        try:
+            user = create_user(engine, payload.username, password_hash, password_salt)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="用户名已被占用") from None
+        return {"token": make_token(user["id"], user["username"]), "username": user["username"]}
+
+    @app.post("/api/auth/login", response_model=AuthOut)
+    def login(payload: LoginPayload, engine: Annotated[DatabaseEngine, Depends(get_engine)]) -> dict:
+        user = get_user_by_username(engine, payload.username)
+        if user is None or not verify_password(payload.password, user["password_hash"], user["password_salt"]):
+            raise HTTPException(status_code=401, detail="用户名或密码错误")
+        return {"token": make_token(user["id"], user["username"]), "username": user["username"]}
+
+    @app.get("/api/auth/me")
+    def me(user: Annotated[dict, Depends(get_current_user)]) -> dict:
+        return {"username": user["username"]}
 
     @app.get("/api/institutions", response_model=list[InstitutionOut])
     def institutions(engine: Annotated[DatabaseEngine, Depends(get_engine)]) -> list[dict]:
@@ -155,15 +182,25 @@ def create_app(database_url: str | None = None) -> FastAPI:
         return generate_report(engine, payload.title, payload.filters)
 
     @app.get("/api/profile")
-    def profile(engine: Annotated[DatabaseEngine, Depends(get_engine)]) -> dict:
-        return get_profile(engine)
+    def profile(
+        engine: Annotated[DatabaseEngine, Depends(get_engine)],
+        user: Annotated[dict, Depends(get_current_user)],
+    ) -> dict:
+        return get_profile(engine, user["id"])
 
     @app.put("/api/profile")
-    def put_profile(payload: ProfilePayload, engine: Annotated[DatabaseEngine, Depends(get_engine)]) -> dict:
-        return save_profile(engine, payload.model_dump())
+    def put_profile(
+        payload: ProfilePayload,
+        engine: Annotated[DatabaseEngine, Depends(get_engine)],
+        user: Annotated[dict, Depends(get_current_user)],
+    ) -> dict:
+        return save_profile(engine, user["id"], payload.model_dump())
 
     @app.post("/api/profile/import", response_model=ProfileImportOut)
-    async def import_profile(file: UploadFile) -> dict:
+    async def import_profile(
+        user: Annotated[dict, Depends(get_current_user)],
+        file: UploadFile,
+    ) -> dict:
         if not (file.filename or "").lower().endswith(".docx"):
             raise HTTPException(status_code=400, detail="仅支持 .docx 文件")
         content = await file.read()
@@ -174,17 +211,22 @@ def create_app(database_url: str | None = None) -> FastAPI:
         return parse_profile_from_lines(lines)
 
     @app.post("/api/resume-drafts", response_model=ResumeDraftOut, status_code=201)
-    def resume_drafts(payload: ResumeDraftCreate, engine: Annotated[DatabaseEngine, Depends(get_engine)]) -> dict:
+    def resume_drafts(
+        payload: ResumeDraftCreate,
+        engine: Annotated[DatabaseEngine, Depends(get_engine)],
+        user: Annotated[dict, Depends(get_current_user)],
+    ) -> dict:
         try:
             job = get_job(engine, payload.job_id)
         except KeyError:
             raise HTTPException(status_code=404, detail="岗位不存在") from None
-        profile_data = get_profile(engine)
+        profile_data = get_profile(engine, user["id"])
         if not any(profile_data.get(collection) for collection in PROFILE_COLLECTIONS):
             raise HTTPException(status_code=400, detail="请先填写或导入履历内容")
         draft = generate_resume_draft(profile_data, job)
         return persist_resume_draft(
             engine,
+            user["id"],
             payload.job_id,
             draft["title"],
             draft["sections"],
@@ -193,16 +235,25 @@ def create_app(database_url: str | None = None) -> FastAPI:
         )
 
     @app.get("/api/resume-drafts/{draft_id}", response_model=ResumeDraftOut)
-    def resume_draft(draft_id: int, engine: Annotated[DatabaseEngine, Depends(get_engine)]) -> dict:
+    def resume_draft(
+        draft_id: int,
+        engine: Annotated[DatabaseEngine, Depends(get_engine)],
+        user: Annotated[dict, Depends(get_current_user)],
+    ) -> dict:
         try:
-            return get_resume_draft(engine, draft_id)
+            return get_resume_draft(engine, user["id"], draft_id)
         except KeyError:
             raise HTTPException(status_code=404, detail="简历草稿不存在") from None
 
     @app.put("/api/resume-drafts/{draft_id}", response_model=ResumeDraftOut)
-    def put_resume_draft(draft_id: int, payload: ResumeDraftUpdate, engine: Annotated[DatabaseEngine, Depends(get_engine)]) -> dict:
+    def put_resume_draft(
+        draft_id: int,
+        payload: ResumeDraftUpdate,
+        engine: Annotated[DatabaseEngine, Depends(get_engine)],
+        user: Annotated[dict, Depends(get_current_user)],
+    ) -> dict:
         try:
-            return update_resume_draft_sections(engine, draft_id, payload.sections)
+            return update_resume_draft_sections(engine, user["id"], draft_id, payload.sections)
         except KeyError:
             raise HTTPException(status_code=404, detail="简历草稿不存在") from None
 
@@ -210,10 +261,11 @@ def create_app(database_url: str | None = None) -> FastAPI:
     def export_resume(
         draft_id: int,
         engine: Annotated[DatabaseEngine, Depends(get_engine)],
+        user: Annotated[dict, Depends(get_current_user)],
         format: Annotated[ExportFormat, Query()] = "docx",
     ) -> Response:
         try:
-            draft = get_resume_draft(engine, draft_id)
+            draft = get_resume_draft(engine, user["id"], draft_id)
         except KeyError:
             raise HTTPException(status_code=404, detail="简历草稿不存在") from None
         if format == "docx":
@@ -233,6 +285,22 @@ def create_app(database_url: str | None = None) -> FastAPI:
 
 def get_engine(request: Request) -> DatabaseEngine:
     return request.app.state.engine
+
+
+def get_current_user(
+    engine: Annotated[DatabaseEngine, Depends(get_engine)],
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict:
+    token = None
+    if authorization and authorization.lower().startswith("bearer "):
+        token = authorization[7:].strip()
+    payload = verify_token(token)
+    if payload is None:
+        raise HTTPException(status_code=401, detail="请先登录")
+    user = get_user_by_id(engine, int(payload["uid"]))
+    if user is None:
+        raise HTTPException(status_code=401, detail="账号不存在或已失效")
+    return user
 
 
 app = create_app()

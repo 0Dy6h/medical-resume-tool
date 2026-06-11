@@ -123,16 +123,24 @@ def init_db(engine: DatabaseEngine) -> None:
             CREATE INDEX IF NOT EXISTS idx_jobs_region ON jobs(region);
             CREATE INDEX IF NOT EXISTS idx_jobs_institution ON jobs(institution_id);
 
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL UNIQUE,
+                password_hash TEXT NOT NULL,
+                password_salt TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS profiles (
-                id TEXT PRIMARY KEY,
+                user_id INTEGER PRIMARY KEY REFERENCES users(id),
                 data TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
 
             CREATE TABLE IF NOT EXISTS resume_drafts (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL REFERENCES users(id),
                 job_id INTEGER NOT NULL REFERENCES jobs(id),
-                profile_id TEXT NOT NULL,
                 title TEXT NOT NULL,
                 sections TEXT NOT NULL,
                 evidence TEXT NOT NULL,

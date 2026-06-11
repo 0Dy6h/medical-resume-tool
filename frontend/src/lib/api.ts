@@ -12,15 +12,51 @@ import type {
 } from "../types";
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "";
+const TOKEN_KEY = "auth_token";
+
+export class UnauthorizedError extends Error {
+  constructor(message = "请先登录") {
+    super(message);
+    this.name = "UnauthorizedError";
+  }
+}
+
+export function getToken(): string | null {
+  return localStorage.getItem(TOKEN_KEY);
+}
+
+export function setToken(token: string | null) {
+  if (token) localStorage.setItem(TOKEN_KEY, token);
+  else localStorage.removeItem(TOKEN_KEY);
+}
+
+let onUnauthorized: (() => void) | null = null;
+
+export function setUnauthorizedHandler(handler: () => void) {
+  onUnauthorized = handler;
+}
+
+function authHeaders(extra?: HeadersInit): HeadersInit {
+  const token = getToken();
+  return {
+    ...(extra ?? {}),
+    ...(token ? { Authorization: `Bearer ${token}` } : {})
+  };
+}
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
     headers: {
       "Content-Type": "application/json",
-      ...(options?.headers ?? {})
+      ...authHeaders(options?.headers)
     },
     ...options
   });
+  if (response.status === 401) {
+    setToken(null);
+    onUnauthorized?.();
+    throw new UnauthorizedError(await response.text() || "请先登录");
+  }
   if (!response.ok) {
     const detail = await response.text();
     throw new Error(detail || `Request failed: ${response.status}`);
@@ -29,6 +65,17 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  register: (username: string, password: string) =>
+    request<{ token: string; username: string }>("/api/auth/register", {
+      method: "POST",
+      body: JSON.stringify({ username, password })
+    }),
+  login: (username: string, password: string) =>
+    request<{ token: string; username: string }>("/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ username, password })
+    }),
+  me: () => request<{ username: string }>("/api/auth/me"),
   institutions: () => request<Institution[]>("/api/institutions"),
   startCrawl: (institutionIds?: number[]) =>
     request<CrawlRun>("/api/crawl-runs", {
@@ -56,8 +103,14 @@ export const api = {
     form.append("file", file);
     const response = await fetch(`${API_BASE}/api/profile/import`, {
       method: "POST",
+      headers: authHeaders(),
       body: form
     });
+    if (response.status === 401) {
+      setToken(null);
+      onUnauthorized?.();
+      throw new UnauthorizedError();
+    }
     if (!response.ok) throw new Error(await response.text());
     return (await response.json()) as ProfileImportResult;
   },
@@ -78,8 +131,14 @@ export const api = {
     }),
   exportResume: async (draftId: number, format: "docx" | "pdf") => {
     const response = await fetch(`${API_BASE}/api/resume-drafts/${draftId}/export?format=${format}`, {
-      method: "POST"
+      method: "POST",
+      headers: authHeaders()
     });
+    if (response.status === 401) {
+      setToken(null);
+      onUnauthorized?.();
+      throw new UnauthorizedError();
+    }
     if (!response.ok) throw new Error(await response.text());
     return response.blob();
   }
