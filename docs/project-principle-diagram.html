@@ -284,13 +284,13 @@
         <div class="pulse" aria-hidden="true"></div>
         <div>
           <h1>医疗岗位情报与真实简历定制工具</h1>
-          <p class="subtitle">项目原理图：从公开官网招聘信息和稳定 fixture 进入抓取解析链路，沉淀为可追溯岗位数据，再由分析服务与真实履历匹配服务支撑前端工作台。</p>
+          <p class="subtitle">项目原理图：从30家种子机构的公开招聘页面和附件(xlsx/xls/pdf)抓取岗位，经分类标签化后沉淀为可追溯数据库，再通过分析引擎生成市场报告；用户注册登录后维护专属真实履历（支持上传docx自动识别），匹配岗位需求生成定制简历草稿，支持DOCX/PDF导出。</p>
         </div>
       </div>
       <div class="meta">
-        <div>Stack: FastAPI + SQLite + React/Vite</div>
-        <div>Scope: 本地 MVP · 公开官网样本</div>
-        <div>Invariant: 不虚构履历事实 · 保留来源证据</div>
+        <div>Stack: FastAPI + SQLite + React/Vite + openpyxl + fpdf2 + python-docx</div>
+        <div>Scope: 多用户MVP · 用户名密码登录 · 12家启用(6 fixture + 6 adapter)</div>
+        <div>Invariant: 不虚构履历事实 · 每条岗位保留来源证据链 · 履历按用户隔离</div>
       </div>
     </header>
 
@@ -482,8 +482,8 @@
           <rect class="node-bg" x="500" y="602" width="430" height="92" rx="6"/>
           <rect class="node-rect" x="500" y="602" width="430" height="92"/>
           <text x="530" y="635" class="node-title">SQLite data/app.db</text>
-          <text x="530" y="658" class="node-sub">institutions · crawl_runs · jobs · profiles</text>
-          <text x="530" y="674" class="node-sub">resume_drafts · reports</text>
+          <text x="530" y="658" class="node-sub">users · institutions · crawl_runs · jobs</text>
+          <text x="530" y="674" class="node-sub">profiles · resume_drafts · reports（履历按 user_id 隔离）</text>
         </g>
 
         <!-- Backend services bottom -->
@@ -530,16 +530,16 @@
           <rect class="node-bg" x="1140" y="332" width="216" height="92" rx="6"/>
           <rect class="node-rect" x="1140" y="332" width="216" height="92"/>
           <text x="1160" y="361" class="node-title">api.ts</text>
-          <text x="1160" y="383" class="node-sub">fetch REST endpoints</text>
-          <text x="1160" y="403" class="tiny">jobs · analytics · profile · resume</text>
+          <text x="1160" y="383" class="node-sub">fetch REST + Bearer token</text>
+          <text x="1160" y="403" class="tiny">auth · jobs · analytics · profile · resume</text>
         </g>
 
         <g class="node frontend">
           <rect class="node-bg" x="1140" y="456" width="216" height="126" rx="6"/>
           <rect class="node-rect" x="1140" y="456" width="216" height="126"/>
           <text x="1160" y="484" class="node-title">页面工作流</text>
-          <text x="1160" y="507" class="node-sub">总览 · 岗位库 · 分析</text>
-          <text x="1160" y="526" class="node-sub">我的履历 · 简历生成</text>
+          <text x="1160" y="507" class="node-sub">登录/注册 · 总览 · 岗位库</text>
+          <text x="1160" y="526" class="node-sub">分析 · 我的履历 · 简历生成</text>
           <text x="1160" y="545" class="node-sub">抓取任务</text>
           <text x="1160" y="565" class="tiny">密集型个人求职工作台</text>
         </g>
@@ -563,7 +563,7 @@
         <!-- API endpoint ribbon -->
         <rect x="374" y="876" width="666" height="58" rx="8" fill="rgba(15,23,42,0.74)" stroke="rgba(148,163,184,0.18)"/>
         <text x="398" y="899" class="tiny">REST API Surface</text>
-        <text x="398" y="920" class="node-sub">/api/institutions · /api/crawl-runs · /api/jobs · /api/analytics/summary · /api/profile · /api/resume-drafts · /api/reports</text>
+        <text x="398" y="920" class="node-sub">/api/auth/* · /api/institutions · /api/crawl-runs · /api/jobs · /api/analytics/summary · /api/profile · /api/profile/import · /api/resume-drafts · /api/reports</text>
 
         <!-- Legend, placed below all boundaries -->
         <g transform="translate(238 996)">
@@ -589,9 +589,10 @@
           <h3>数据入口</h3>
         </div>
         <ul>
-          <li>• 前 6 家机构走 deterministic fixture，保证演示稳定。</li>
-          <li>• 6 个官网适配器抓公开招聘公告，通用解析器作为低置信兜底。</li>
-          <li>• xlsx/xls 附件可生成行级岗位；PDF 当前只保留证据。</li>
+          <li>• 前6家机构走deterministic fixture保证演示稳定,另6家启用专用官网适配器。</li>
+          <li>• 支持从招聘公告页面发现并解析公开xlsx/xls附件为行级岗位,PDF附件记录证据待扩展。</li>
+          <li>• bjmu/chinacdc已实现附件解析,njmu/hrbmu实现附件发现,nfyy/z2hospital解析静态公告页。</li>
+          <li>• 通用解析器作为兜底,所有岗位保留parser_name和confidence供质量review。</li>
         </ul>
       </div>
       <div class="card">
@@ -600,9 +601,12 @@
           <h3>处理闭环</h3>
         </div>
         <ul>
-          <li>• 后端负责抓取、解析、分类、去重、分析、报告和导出。</li>
-          <li>• SQLite 保存机构、任务、岗位、履历、草稿和报告。</li>
-          <li>• React/Vite 前端通过 REST API 形成求职工作台。</li>
+          <li>• 抓取→解析→分类标签→去重→入库全流程在FastAPI后端完成,支持批量和单机构触发,抓取后台执行+前端轮询进度。</li>
+          <li>• SQLite持久化users/institutions/crawl_runs/jobs/profiles/resume_drafts/reports七张主表,profiles与resume_drafts按user_id隔离。</li>
+          <li>• 分析引擎按岗位类别/学历/地区/机构类型/能力标签聚合,生成Markdown+HTML报告。</li>
+          <li>• 简历生成将结构化履历字段扁平化后与岗位需求规则匹配,输出sections/evidence/gaps三层结构。</li>
+          <li>• 用户可手动填写或上传docx简历自动识别(规则解析,无LLM),预览勾选后合并入履历。</li>
+          <li>• 前端React/Vite工作台通过REST API完成登录/总览/岗位库/分析/履历/简历生成/抓取任务全流程。</li>
         </ul>
       </div>
       <div class="card">
@@ -611,9 +615,10 @@
           <h3>真实性约束</h3>
         </div>
         <ul>
-          <li>• 岗位必须保留 source_url、source_text_hash、fetched_at、parser_name。</li>
-          <li>• 简历生成只重组结构化履历里的事实，并记录 profile_field_id。</li>
-          <li>• 无履历证据的岗位要求进入 gaps，不编造经历或成果。</li>
+          <li>• 岗位四要素:source_url/source_text_hash/fetched_at/parser_name,附件岗位额外保留announcement_url/attachment_url/sheet_name/row_index。</li>
+          <li>• 简历草稿只重组用户提供的结构化字段(education/experiences/projects/publications/teaching/awards/certificates/skills/languages),每项标注profile_field_id。已移除个人信息字段,所有部分非必填。</li>
+          <li>• 无履历证据的岗位要求进入gaps数组,明确提示"未在你的履历中找到对应证据",绝不编造经历/项目/成果/证书。</li>
+          <li>• 分析服务parser_quality维度按解析器聚合jobs/low_confidence_jobs/attachment_sourced_jobs/failed_attachment_events和平均置信度,标记review/watch/stable三档供人工抽样质检。</li>
         </ul>
       </div>
     </section>
