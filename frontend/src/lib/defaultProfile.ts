@@ -1,12 +1,6 @@
 import type { Profile } from "../types";
 
 export const emptyProfile: Profile = {
-  basic: {
-    name: "",
-    phone: "",
-    email: "",
-    city: ""
-  },
   education: [],
   experiences: [],
   projects: [],
@@ -19,12 +13,6 @@ export const emptyProfile: Profile = {
 };
 
 export const demoProfile: Profile = {
-  basic: {
-    name: "陈晓雨",
-    phone: "13800000000",
-    email: "chen@example.com",
-    city: "上海"
-  },
   education: [
     {
       id: "edu-1",

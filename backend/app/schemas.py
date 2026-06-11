@@ -90,7 +90,6 @@ class AnalyticsSummary(BaseModel):
 
 
 class ProfilePayload(BaseModel):
-    basic: dict[str, Any] = Field(default_factory=dict)
     education: list[dict[str, Any]] = Field(default_factory=list)
     experiences: list[dict[str, Any]] = Field(default_factory=list)
     projects: list[dict[str, Any]] = Field(default_factory=list)
@@ -100,6 +99,19 @@ class ProfilePayload(BaseModel):
     teaching: list[dict[str, Any]] = Field(default_factory=list)
     awards: list[dict[str, Any]] = Field(default_factory=list)
     languages: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class ProfileImportOut(BaseModel):
+    education: list[dict[str, Any]] = Field(default_factory=list)
+    experiences: list[dict[str, Any]] = Field(default_factory=list)
+    projects: list[dict[str, Any]] = Field(default_factory=list)
+    publications: list[dict[str, Any]] = Field(default_factory=list)
+    certificates: list[dict[str, Any]] = Field(default_factory=list)
+    skills: list[dict[str, Any]] = Field(default_factory=list)
+    teaching: list[dict[str, Any]] = Field(default_factory=list)
+    awards: list[dict[str, Any]] = Field(default_factory=list)
+    languages: list[dict[str, Any]] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
 
 
 class ResumeDraftCreate(BaseModel):

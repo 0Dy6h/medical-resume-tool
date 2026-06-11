@@ -112,7 +112,6 @@ export type ParserQuality = {
 };
 
 export type Profile = {
-  basic: Record<string, string>;
   education: Array<Record<string, unknown>>;
   experiences: Array<Record<string, unknown>>;
   projects: Array<Record<string, unknown>>;
@@ -123,6 +122,10 @@ export type Profile = {
   awards: Array<Record<string, unknown>>;
   languages: Array<Record<string, unknown>>;
   updated_at?: string | null;
+};
+
+export type ProfileImportResult = Omit<Profile, "updated_at"> & {
+  warnings: string[];
 };
 
 export type ResumeSection = {

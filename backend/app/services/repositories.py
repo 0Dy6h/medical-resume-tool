@@ -262,7 +262,6 @@ def get_profile(engine: DatabaseEngine) -> dict[str, Any]:
         row = conn.execute("SELECT data, updated_at FROM profiles WHERE id = 'default'").fetchone()
     if row is None:
         return {
-            "basic": {},
             "education": [],
             "experiences": [],
             "projects": [],
@@ -275,6 +274,7 @@ def get_profile(engine: DatabaseEngine) -> dict[str, Any]:
             "updated_at": None,
         }
     data = from_json(row["data"], {})
+    data.pop("basic", None)
     data["updated_at"] = row["updated_at"]
     return data
 

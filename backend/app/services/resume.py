@@ -83,30 +83,11 @@ def match_profile_to_job(profile: dict[str, Any], job: dict[str, Any]) -> tuple[
 
 
 def build_resume_sections(profile: dict[str, Any], job: dict[str, Any], evidence: list[dict[str, Any]], gaps: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    basic = profile.get("basic", {})
     evidence_by_collection: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for item in evidence:
         evidence_by_collection[item["collection"]].append(item)
 
     sections: list[dict[str, Any]] = [
-        {
-            "id": "header",
-            "title": "基本信息",
-            "items": [
-                {
-                    "text": " | ".join(
-                        part
-                        for part in [
-                            basic.get("name"),
-                            basic.get("phone"),
-                            basic.get("email"),
-                            basic.get("city"),
-                        ]
-                        if part
-                    )
-                }
-            ],
-        },
         {
             "id": "target",
             "title": "求职目标",
@@ -168,5 +149,5 @@ def _format_profile_item(item: dict[str, Any]) -> str:
 def generate_resume_draft(profile: dict[str, Any], job: dict[str, Any]) -> dict[str, Any]:
     evidence, gaps = match_profile_to_job(profile, job)
     sections = build_resume_sections(profile, job, evidence, gaps)
-    title = f"{profile.get('basic', {}).get('name', '候选人')} - {job['title']} 定制简历"
+    title = f"{job['title']} 定制简历"
     return {"title": title, "sections": sections, "evidence": evidence, "gaps": gaps}

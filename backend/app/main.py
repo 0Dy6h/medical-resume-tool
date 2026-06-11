@@ -4,7 +4,7 @@ import asyncio
 import os
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.schemas import (
@@ -15,6 +15,7 @@ from app.schemas import (
     InstitutionOut,
     JobDetailOut,
     JobListOut,
+    ProfileImportOut,
     ProfilePayload,
     ReportCreate,
     ReportOut,
@@ -26,6 +27,7 @@ from app.services.analytics import analytics_summary, generate_report
 from app.services.crawler import crawl_institution
 from app.services.database import DatabaseEngine, create_engine, init_db
 from app.services.exporter import export_docx, export_pdf
+from app.services.profile_import import extract_docx_text, parse_profile_from_lines
 from app.services.repositories import (
     complete_crawl_run,
     create_crawl_run,
@@ -42,7 +44,7 @@ from app.services.repositories import (
     upsert_job,
     create_resume_draft as persist_resume_draft,
 )
-from app.services.resume import generate_resume_draft
+from app.services.resume import PROFILE_COLLECTIONS, generate_resume_draft
 
 
 DEFAULT_DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./data/app.db")
@@ -181,6 +183,17 @@ def create_app(database_url: str | None = None) -> FastAPI:
     def put_profile(payload: ProfilePayload, engine: Annotated[DatabaseEngine, Depends(get_engine)]) -> dict:
         return save_profile(engine, payload.model_dump())
 
+    @app.post("/api/profile/import", response_model=ProfileImportOut)
+    async def import_profile(file: UploadFile) -> dict:
+        if not (file.filename or "").lower().endswith(".docx"):
+            raise HTTPException(status_code=400, detail="仅支持 .docx 文件")
+        content = await file.read()
+        try:
+            lines = extract_docx_text(content)
+        except Exception:
+            raise HTTPException(status_code=400, detail="无法读取该 docx 文件，请确认文件未损坏") from None
+        return parse_profile_from_lines(lines)
+
     @app.post("/api/resume-drafts", response_model=ResumeDraftOut, status_code=201)
     def resume_drafts(payload: ResumeDraftCreate, engine: Annotated[DatabaseEngine, Depends(get_engine)]) -> dict:
         try:
@@ -188,8 +201,8 @@ def create_app(database_url: str | None = None) -> FastAPI:
         except KeyError:
             raise HTTPException(status_code=404, detail="岗位不存在") from None
         profile_data = get_profile(engine)
-        if not profile_data.get("basic"):
-            raise HTTPException(status_code=400, detail="请先填写结构化履历")
+        if not any(profile_data.get(collection) for collection in PROFILE_COLLECTIONS):
+            raise HTTPException(status_code=400, detail="请先填写或导入履历内容")
         draft = generate_resume_draft(profile_data, job)
         return persist_resume_draft(
             engine,

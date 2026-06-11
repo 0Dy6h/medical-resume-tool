@@ -309,8 +309,11 @@ def test_profile_resume_draft_truth_constraints_and_exports(tmp_path):
     client.post("/api/crawl-runs", json={"institution_ids": [1]})
     job = client.get("/api/jobs", params={"keyword": "科研"}).json()["items"][0]
 
+    empty_draft = client.post("/api/resume-drafts", json={"job_id": job["id"]})
+    assert empty_draft.status_code == 400
+    assert "请先填写或导入履历内容" in empty_draft.text
+
     profile_payload = {
-        "basic": {"name": "陈晓雨", "phone": "13800000000", "email": "chen@example.com", "city": "上海"},
         "education": [
             {
                 "id": "edu-1",
@@ -409,7 +412,6 @@ def test_profile_extended_collections_can_supply_resume_evidence(tmp_path):
     job = client.get("/api/jobs", params={"keyword": "教学"}).json()["items"][0]
 
     profile_payload = {
-        "basic": {"name": "林晓", "phone": "13900000000", "email": "lin@example.com", "city": "南京"},
         "education": [],
         "experiences": [],
         "projects": [],
@@ -446,7 +448,6 @@ def test_pdf_export_accepts_chinese_resume_content(tmp_path):
     client.post("/api/crawl-runs", json={"institution_ids": [3]})
     job = client.get("/api/jobs", params={"keyword": "教学"}).json()["items"][0]
     profile_payload = {
-        "basic": {"name": "林晓", "phone": "13900000000", "email": "lin@example.com", "city": "南京"},
         "education": [{"id": "edu-1", "school": "复旦大学", "degree": "博士", "major": "公共卫生"}],
         "experiences": [],
         "projects": [],

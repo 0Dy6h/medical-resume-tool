@@ -5,6 +5,7 @@ import type {
   JobDetail,
   JobList,
   Profile,
+  ProfileImportResult,
   Report,
   ResumeDraft,
   ResumeSection
@@ -49,6 +50,16 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(profile)
     }),
+  importProfile: async (file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    const response = await fetch(`${API_BASE}/api/profile/import`, {
+      method: "POST",
+      body: form
+    });
+    if (!response.ok) throw new Error(await response.text());
+    return (await response.json()) as ProfileImportResult;
+  },
   createResumeDraft: (jobId: number) =>
     request<ResumeDraft>("/api/resume-drafts", {
       method: "POST",

@@ -1,8 +1,8 @@
-import { Plus, Save, Sparkles, Trash2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { FileUp, Plus, Save, Sparkles, Trash2 } from "lucide-react";
+import { useRef, useEffect, useState } from "react";
 import { api } from "../lib/api";
 import { demoProfile, emptyProfile } from "../lib/defaultProfile";
-import type { Profile } from "../types";
+import type { Profile, ProfileImportResult } from "../types";
 
 type Field = {
   key: string;
@@ -123,6 +123,11 @@ function toStoredValue(value: string, area?: boolean) {
 export function ProfilePage() {
   const [profile, setProfile] = useState<Profile>(emptyProfile);
   const [saved, setSaved] = useState(false);
+  const [preview, setPreview] = useState<ProfileImportResult | null>(null);
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
+  const [importing, setImporting] = useState(false);
+  const [importError, setImportError] = useState("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     api.profile().then((payload) => setProfile({ ...emptyProfile, ...payload }));
@@ -134,8 +139,64 @@ export function ProfilePage() {
     window.setTimeout(() => setSaved(false), 1600);
   }
 
-  function updateBasic(key: string, value: string) {
-    setProfile((current) => ({ ...current, basic: { ...current.basic, [key]: value } }));
+  async function handleImportFile(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    setImporting(true);
+    setImportError("");
+    try {
+      const result = await api.importProfile(file);
+      const keys = new Set<string>();
+      configs.forEach((config) => {
+        (result[config.key as keyof ProfileImportResult] as Array<Record<string, unknown>> | undefined)?.forEach((_, index) => {
+          keys.add(`${String(config.key)}-${index}`);
+        });
+      });
+      setPreview(result);
+      setSelectedKeys(keys);
+    } catch (error) {
+      setImportError(error instanceof Error ? error.message : "导入失败");
+    } finally {
+      setImporting(false);
+    }
+  }
+
+  function toggleSelected(key: string) {
+    setSelectedKeys((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  function confirmImport() {
+    if (!preview) return;
+    setProfile((current) => {
+      const next = { ...current };
+      configs.forEach((config) => {
+        const items = (preview[config.key as keyof ProfileImportResult] as Array<Record<string, unknown>> | undefined) ?? [];
+        const accepted = items
+          .filter((_, index) => selectedKeys.has(`${String(config.key)}-${index}`))
+          .map((item) => ({ ...item, id: newId(String(config.key)) }));
+        if (accepted.length) {
+          next[config.key] = [...((current[config.key] as Array<Record<string, unknown>>) ?? []), ...accepted] as never;
+        }
+      });
+      return next;
+    });
+    setPreview(null);
+  }
+
+  function previewItemSummary(config: CollectionConfig, item: Record<string, unknown>) {
+    return config.fields
+      .map((field) => {
+        const value = textValue(item[field.key]).replace(/\n/g, "；");
+        return value ? `${field.label}：${value}` : "";
+      })
+      .filter(Boolean)
+      .join(" / ");
   }
 
   function addItem(config: CollectionConfig) {
@@ -171,6 +232,17 @@ export function ProfilePage() {
           <p className="subtle">结构化事实库</p>
         </div>
         <div className="button-row">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".docx"
+            style={{ display: "none" }}
+            onChange={handleImportFile}
+          />
+          <button className="icon-text-button" onClick={() => fileInputRef.current?.click()} disabled={importing}>
+            <FileUp size={17} />
+            {importing ? "解析中..." : "导入资料"}
+          </button>
           <button className="icon-text-button" onClick={() => setProfile(demoProfile)}>
             <Sparkles size={17} />
             示例
@@ -182,22 +254,54 @@ export function ProfilePage() {
         </div>
       </div>
 
-      <section className="panel form-panel">
-        <div className="panel-head"><h2>基本信息</h2></div>
-        <div className="form-grid">
-          {[
-            ["name", "姓名"],
-            ["phone", "电话"],
-            ["email", "邮箱"],
-            ["city", "城市"]
-          ].map(([key, label]) => (
-            <label key={key}>
-              <span>{label}</span>
-              <input value={profile.basic[key] ?? ""} onChange={(event) => updateBasic(key, event.target.value)} />
-            </label>
-          ))}
-        </div>
-      </section>
+      {importError && <div className="error-strip">{importError}</div>}
+
+      {preview && (
+        <section className="panel form-panel">
+          <div className="panel-head">
+            <h2>导入预览</h2>
+            <div className="button-row">
+              <button className="text-button" onClick={() => setPreview(null)}>
+                取消
+              </button>
+              <button className="primary-button" onClick={confirmImport} disabled={selectedKeys.size === 0}>
+                确认导入（{selectedKeys.size} 条）
+              </button>
+            </div>
+          </div>
+          {preview.warnings.length > 0 && (
+            <div className="compact-list">
+              {preview.warnings.map((warning, index) => (
+                <div className="gap-card" key={index}>{warning}</div>
+              ))}
+            </div>
+          )}
+          {configs.map((config) => {
+            const items = (preview[config.key as keyof ProfileImportResult] as Array<Record<string, unknown>> | undefined) ?? [];
+            if (!items.length) return null;
+            return (
+              <div key={String(config.key)}>
+                <h3>{config.title}（{items.length}）</h3>
+                <div className="compact-list">
+                  {items.map((item, index) => {
+                    const key = `${String(config.key)}-${index}`;
+                    return (
+                      <label className="compact-row" key={key} style={{ cursor: "pointer" }}>
+                        <input
+                          type="checkbox"
+                          checked={selectedKeys.has(key)}
+                          onChange={() => toggleSelected(key)}
+                        />
+                        <span>{previewItemSummary(config, item) || "（空条目）"}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </section>
+      )}
 
       {configs.map((config) => (
         <section className="panel form-panel" key={String(config.key)}>
