@@ -31,7 +31,7 @@ from app.services.auth import hash_password, make_token, verify_password, verify
 from app.services.crawler import execute_crawl_run
 from app.services.database import DatabaseEngine, create_engine, init_db
 from app.services.exporter import export_docx, export_pdf
-from app.services.profile_import import extract_docx_text, parse_profile_from_lines
+from app.services.profile_import import ProfileImportError, extract_profile_text, legacy_to_contract, parse_profile_from_lines
 from app.services.repositories import (
     create_crawl_run,
     create_user,
@@ -201,14 +201,14 @@ def create_app(database_url: str | None = None) -> FastAPI:
         user: Annotated[dict, Depends(get_current_user)],
         file: UploadFile,
     ) -> dict:
-        if not (file.filename or "").lower().endswith(".docx"):
-            raise HTTPException(status_code=400, detail="仅支持 .docx 文件")
         content = await file.read()
         try:
-            lines = extract_docx_text(content)
-        except Exception:
-            raise HTTPException(status_code=400, detail="无法读取该 docx 文件，请确认文件未损坏") from None
-        return parse_profile_from_lines(lines)
+            extraction = extract_profile_text(file.filename or "", content)
+        except ProfileImportError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+        parsed = parse_profile_from_lines(extraction.lines)
+        contract = legacy_to_contract(parsed, extraction.warnings)
+        return contract.to_dict()
 
     @app.post("/api/resume-drafts", response_model=ResumeDraftOut, status_code=201)
     def resume_drafts(

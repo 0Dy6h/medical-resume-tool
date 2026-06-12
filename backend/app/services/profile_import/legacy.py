@@ -1,12 +1,16 @@
-"""docx 履历资料导入：文本提取 + 规则解析。
+"""履历资料导入：文档/文本/图片提取 + 规则解析。
 
-解析是无状态的：上传的 docx 只在内存中转成行文本，再按板块标题切分、
-逐条目抽取结构化字段。识别不出的内容保留在 highlights 或 warnings 中，不丢弃。
+解析是无状态的：上传文件只在内存中转成行文本，再按板块标题切分、逐条目抽取结构化字段。
+识别不出的内容保留在 highlights 或 warnings 中，不丢弃。图片 OCR 依赖本机 Tesseract；不可用时
+返回 warning，而不是让整个导入失败。
 """
 from __future__ import annotations
 
+import os
 import re
+from dataclasses import dataclass, field
 from io import BytesIO
+from pathlib import Path
 from typing import Any
 
 from docx import Document
@@ -55,9 +59,46 @@ _LANGUAGE_NAME = re.compile(r"英语|日语|法语|德语|俄语|韩语|西班�
 _LANGUAGE_LEVEL = re.compile(r"CET-?[46]|四级|六级|专业四级|专业八级|专四|专八|N[1-5]|雅思\s*[\d.]*|托福\s*\d*|IELTS\s*[\d.]*|TOEFL\s*\d*")
 _TOKEN_SPLIT = re.compile(r"[\s,，;；、|/]+")
 
+TEXT_EXTENSIONS = {".txt", ".md", ".markdown"}
+IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"}
+SUPPORTED_IMPORT_EXTENSIONS = {".docx", ".pdf", *TEXT_EXTENSIONS, *IMAGE_EXTENSIONS}
+MAX_PDF_PAGES = int(os.getenv("PROFILE_IMPORT_MAX_PDF_PAGES", "20"))
+MAX_PDF_OCR_PAGES = int(os.getenv("PROFILE_IMPORT_MAX_PDF_OCR_PAGES", "3"))
+MAX_IMAGE_FRAMES = int(os.getenv("PROFILE_IMPORT_MAX_IMAGE_FRAMES", "5"))
+OCR_LANGUAGES = os.getenv("PROFILE_IMPORT_OCR_LANGUAGES", "chi_sim+eng")
+
+
+@dataclass
+class ProfileTextExtraction:
+    lines: list[str]
+    warnings: list[str] = field(default_factory=list)
+
+
+class ProfileImportError(ValueError):
+    pass
+
+
+def extract_profile_text(filename: str, content: bytes) -> ProfileTextExtraction:
+    extension = Path(filename or "").suffix.lower()
+    if extension not in SUPPORTED_IMPORT_EXTENSIONS:
+        supported = "、".join(sorted(SUPPORTED_IMPORT_EXTENSIONS))
+        raise ProfileImportError(f"仅支持以下资料格式：{supported}")
+    if not content:
+        raise ProfileImportError("上传文件为空")
+    if extension == ".docx":
+        return ProfileTextExtraction(extract_docx_text(content))
+    if extension == ".pdf":
+        return extract_pdf_text(content)
+    if extension in TEXT_EXTENSIONS:
+        return extract_plain_text(content)
+    return extract_image_text(content, filename or extension)
+
 
 def extract_docx_text(content: bytes) -> list[str]:
-    document = Document(BytesIO(content))
+    try:
+        document = Document(BytesIO(content))
+    except Exception as exc:
+        raise ProfileImportError("无法读取该 docx 文件，请确认文件未损坏") from exc
     lines: list[str] = [paragraph.text for paragraph in document.paragraphs]
     for table in document.tables:
         for row in table.rows:
@@ -66,6 +107,146 @@ def extract_docx_text(content: bytes) -> list[str]:
             if unique:
                 lines.append("；".join(unique))
     return lines
+
+
+def extract_pdf_text(content: bytes) -> ProfileTextExtraction:
+    try:
+        import fitz  # PyMuPDF
+    except ImportError as exc:  # pragma: no cover - dependency is declared in pyproject.
+        raise ProfileImportError("PDF 导入需要安装 PyMuPDF") from exc
+
+    try:
+        document = fitz.open(stream=content, filetype="pdf")
+    except Exception as exc:
+        raise ProfileImportError("无法读取该 PDF 文件，请确认文件未损坏") from exc
+
+    lines: list[str] = []
+    warnings: list[str] = []
+    textless_pages: list[int] = []
+    try:
+        page_count = document.page_count
+        limit = min(page_count, MAX_PDF_PAGES)
+        if page_count > MAX_PDF_PAGES:
+            warnings.append(f"PDF 共 {page_count} 页，仅解析前 {MAX_PDF_PAGES} 页")
+        for page_index in range(limit):
+            page = document.load_page(page_index)
+            page_text = page.get_text("text")
+            if normalize_text(page_text):
+                lines.extend(page_text.splitlines())
+                lines.append("")
+            else:
+                textless_pages.append(page_index)
+        if textless_pages:
+            ocr_lines, ocr_warnings = _ocr_pdf_pages(document, textless_pages)
+            if ocr_lines:
+                lines.extend(ocr_lines)
+            warnings.extend(ocr_warnings)
+        if not any(normalize_text(line) for line in lines):
+            warnings.append("PDF 中未提取到可识别文本；如果是扫描件，请确认本机已安装 Tesseract OCR")
+    finally:
+        document.close()
+    return ProfileTextExtraction(lines=lines, warnings=_dedupe(warnings))
+
+
+def extract_plain_text(content: bytes) -> ProfileTextExtraction:
+    warnings: list[str] = []
+    for encoding in ["utf-8-sig", "utf-8", "gb18030", "gbk", "big5"]:
+        try:
+            return ProfileTextExtraction(content.decode(encoding).splitlines())
+        except UnicodeDecodeError:
+            continue
+    text = content.decode("utf-8", errors="replace")
+    warnings.append("文本编码无法完全识别，已尽量保留可读内容")
+    return ProfileTextExtraction(text.splitlines(), warnings)
+
+
+def extract_image_text(content: bytes, filename: str) -> ProfileTextExtraction:
+    lines, warnings = _ocr_image_bytes(content, source_label=filename)
+    if not any(normalize_text(line) for line in lines):
+        warnings.append("图片中未识别到可解析文本；请确认图片清晰，或改用 docx/pdf/txt 上传")
+    return ProfileTextExtraction(lines=lines, warnings=_dedupe(warnings))
+
+
+def _ocr_pdf_pages(document: Any, page_indexes: list[int]) -> tuple[list[str], list[str]]:
+    if not page_indexes:
+        return [], []
+    ocr_indexes = page_indexes[:MAX_PDF_OCR_PAGES]
+    warnings = []
+    if len(page_indexes) > MAX_PDF_OCR_PAGES:
+        warnings.append(f"PDF 有 {len(page_indexes)} 页未含可提取文本，仅尝试 OCR 前 {MAX_PDF_OCR_PAGES} 页")
+    lines: list[str] = []
+    for page_index in ocr_indexes:
+        page = document.load_page(page_index)
+        pixmap = page.get_pixmap(matrix=_pdf_ocr_matrix(), alpha=False)
+        page_lines, page_warnings = _ocr_image_bytes(pixmap.tobytes("png"), source_label=f"PDF 第 {page_index + 1} 页")
+        lines.extend(page_lines)
+        warnings.extend(page_warnings)
+    return lines, _dedupe(warnings)
+
+
+def _pdf_ocr_matrix() -> Any:
+    import fitz
+
+    return fitz.Matrix(2, 2)
+
+
+def _ocr_image_bytes(content: bytes, *, source_label: str) -> tuple[list[str], list[str]]:
+    try:
+        from PIL import Image, ImageOps, ImageSequence
+        import pytesseract
+    except ImportError as exc:  # pragma: no cover - dependencies are declared in pyproject.
+        return [], [f"{source_label} 需要图片 OCR 依赖：{exc}"]
+
+    tesseract_cmd = os.getenv("TESSERACT_CMD")
+    if tesseract_cmd:
+        pytesseract.pytesseract.tesseract_cmd = tesseract_cmd
+    try:
+        image = Image.open(BytesIO(content))
+    except Exception as exc:
+        raise ProfileImportError("无法读取该图片文件，请确认文件未损坏") from exc
+
+    lines: list[str] = []
+    warnings: list[str] = []
+    try:
+        frames = list(ImageSequence.Iterator(image))[:MAX_IMAGE_FRAMES]
+        if getattr(image, "n_frames", 1) > MAX_IMAGE_FRAMES:
+            warnings.append(f"{source_label} 包含多帧图片，仅 OCR 前 {MAX_IMAGE_FRAMES} 帧")
+        for index, frame in enumerate(frames, start=1):
+            prepared = ImageOps.exif_transpose(frame).convert("RGB")
+            try:
+                text = _image_to_string(pytesseract, prepared)
+            except Exception as exc:
+                warnings.append(f"{source_label} OCR 不可用：{_friendly_ocr_error(exc)}")
+                break
+            if normalize_text(text):
+                lines.extend(text.splitlines())
+                if len(frames) > 1 and index < len(frames):
+                    lines.append("")
+    finally:
+        image.close()
+    return lines, _dedupe(warnings)
+
+
+def _image_to_string(pytesseract_module: Any, image: Any) -> str:
+    try:
+        return pytesseract_module.image_to_string(image, lang=OCR_LANGUAGES)
+    except Exception:
+        if OCR_LANGUAGES != "eng":
+            return pytesseract_module.image_to_string(image, lang="eng")
+        raise
+
+
+def _friendly_ocr_error(exc: Exception) -> str:
+    message = str(exc).strip()
+    if "tesseract is not installed" in message.lower() or "not in your path" in message.lower():
+        return "未找到 Tesseract 可执行程序，请安装 Tesseract 或配置 TESSERACT_CMD"
+    if "failed loading language" in message.lower() or "couldn't load any languages" in message.lower():
+        return f"未安装 OCR 语言包 {OCR_LANGUAGES}，请安装中文/英文语言包或调整 PROFILE_IMPORT_OCR_LANGUAGES"
+    return message or exc.__class__.__name__
+
+
+def _dedupe(items: list[str]) -> list[str]:
+    return list(dict.fromkeys(item for item in items if item))
 
 
 def parse_profile_from_lines(lines: list[str]) -> dict[str, Any]:

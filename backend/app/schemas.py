@@ -116,6 +116,26 @@ class ProfilePayload(BaseModel):
     languages: list[dict[str, Any]] = Field(default_factory=list)
 
 
+class ReviewItem(BaseModel):
+    collection: str
+    item: dict[str, Any]
+    source_text: str
+    confidence: float
+    warnings: list[str] = Field(default_factory=list)
+
+
+class UnassignedBlock(BaseModel):
+    text: str
+    reason: str
+
+
+class ImportMeta(BaseModel):
+    source_type: str
+    extractor_name: str
+    text_quality: float
+    warnings: list[str] = Field(default_factory=list)
+
+
 class ProfileImportOut(BaseModel):
     education: list[dict[str, Any]] = Field(default_factory=list)
     experiences: list[dict[str, Any]] = Field(default_factory=list)
@@ -126,6 +146,9 @@ class ProfileImportOut(BaseModel):
     teaching: list[dict[str, Any]] = Field(default_factory=list)
     awards: list[dict[str, Any]] = Field(default_factory=list)
     languages: list[dict[str, Any]] = Field(default_factory=list)
+    review_items: list[ReviewItem] = Field(default_factory=list)
+    unassigned_blocks: list[UnassignedBlock] = Field(default_factory=list)
+    import_meta: ImportMeta | None = None
     warnings: list[str] = Field(default_factory=list)
 
 

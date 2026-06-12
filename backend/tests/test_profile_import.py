@@ -1,11 +1,14 @@
 from io import BytesIO
 from pathlib import Path
 
+import fitz
+import pytest
 from docx import Document
 from fastapi.testclient import TestClient
 
 from app.main import create_app
 from app.services.database import init_db, reset_db
+from app.services.exporter import _find_cjk_font
 from app.services.profile_import import extract_docx_text, parse_profile_from_lines
 
 
@@ -47,6 +50,37 @@ def sample_resume_docx() -> bytes:
     buffer = BytesIO()
     document.save(buffer)
     return buffer.getvalue()
+
+
+def sample_resume_text() -> str:
+    return "\n".join(
+        [
+            "教育经历",
+            "2021.09-2024.06 复旦大学 临床医学 硕士",
+            "循证医学训练",
+            "",
+            "专业技能",
+            "SPSS、Python、数据管理",
+        ]
+    )
+
+
+def sample_resume_pdf() -> bytes:
+    font_path = _find_cjk_font()
+    if font_path is None:
+        pytest.skip("No CJK font available for PDF import fixture")
+    document = fitz.open()
+    page = document.new_page()
+    page.insert_text(
+        (72, 72),
+        sample_resume_text(),
+        fontsize=12,
+        fontfile=str(font_path),
+        fontname="cjk",
+    )
+    payload = document.tobytes()
+    document.close()
+    return payload
 
 
 def test_parse_profile_extracts_sections_and_fields():
@@ -113,6 +147,72 @@ def test_import_endpoint_returns_parsed_profile(tmp_path):
     assert "warnings" in payload
 
 
+def test_import_endpoint_accepts_plain_text(tmp_path):
+    client = make_client(tmp_path)
+    auth = auth_headers(client)
+    response = client.post(
+        "/api/profile/import",
+        files={"file": ("resume.txt", sample_resume_text().encode("utf-8"), "text/plain")},
+        headers=auth,
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["education"][0]["school"] == "复旦大学"
+    assert {item["name"] for item in payload["skills"]} >= {"SPSS", "Python", "数据管理"}
+
+
+def test_import_endpoint_accepts_markdown(tmp_path):
+    client = make_client(tmp_path)
+    auth = auth_headers(client)
+    markdown = "# 教育经历\n2021.09-2024.06 复旦大学 临床医学 硕士\n\n## 专业技能\nSPSS、Python"
+    response = client.post(
+        "/api/profile/import",
+        files={"file": ("resume.md", markdown.encode("utf-8"), "text/markdown")},
+        headers=auth,
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["education"][0]["major"] == "临床医学"
+    assert {item["name"] for item in payload["skills"]} >= {"SPSS", "Python"}
+
+
+def test_import_endpoint_accepts_text_pdf(tmp_path):
+    client = make_client(tmp_path)
+    auth = auth_headers(client)
+    response = client.post(
+        "/api/profile/import",
+        files={"file": ("resume.pdf", sample_resume_pdf(), "application/pdf")},
+        headers=auth,
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["education"][0]["school"] == "复旦大学"
+
+
+def test_import_endpoint_accepts_image_ocr_text(tmp_path, monkeypatch):
+    client = make_client(tmp_path)
+    auth = auth_headers(client)
+
+    def fake_ocr_image_bytes(content: bytes, *, source_label: str):
+        assert source_label == "resume.png"
+        return sample_resume_text().splitlines(), ["OCR 低置信样例"]
+
+    monkeypatch.setattr("app.services.profile_import.legacy._ocr_image_bytes", fake_ocr_image_bytes)
+    response = client.post(
+        "/api/profile/import",
+        files={"file": ("resume.png", b"fake image bytes", "image/png")},
+        headers=auth,
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["education"][0]["school"] == "复旦大学"
+    assert "OCR 低置信样例" in payload["warnings"]
+
+
 def test_import_endpoint_requires_auth(tmp_path):
     client = make_client(tmp_path)
     response = client.post(
@@ -122,12 +222,12 @@ def test_import_endpoint_requires_auth(tmp_path):
     assert response.status_code == 401
 
 
-def test_import_endpoint_rejects_non_docx(tmp_path):
+def test_import_endpoint_rejects_unsupported_file_type(tmp_path):
     client = make_client(tmp_path)
     auth = auth_headers(client)
-    response = client.post("/api/profile/import", files={"file": ("resume.pdf", b"%PDF-1.4", "application/pdf")}, headers=auth)
+    response = client.post("/api/profile/import", files={"file": ("resume.rtf", b"{\\rtf1}", "application/rtf")}, headers=auth)
     assert response.status_code == 400
-    assert "docx" in response.text
+    assert "支持" in response.text
 
 
 def test_import_endpoint_rejects_corrupt_docx(tmp_path):

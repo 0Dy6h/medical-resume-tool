@@ -124,7 +124,30 @@ export type Profile = {
   updated_at?: string | null;
 };
 
+export type ReviewItem = {
+  collection: string;
+  item: Record<string, unknown>;
+  source_text: string;
+  confidence: number;
+  warnings: string[];
+};
+
+export type UnassignedBlock = {
+  text: string;
+  reason: string;
+};
+
+export type ImportMeta = {
+  source_type: string;
+  extractor_name: string;
+  text_quality: number;
+  warnings: string[];
+};
+
 export type ProfileImportResult = Omit<Profile, "updated_at"> & {
+  review_items?: ReviewItem[];
+  unassigned_blocks?: UnassignedBlock[];
+  import_meta?: ImportMeta;
   warnings: string[];
 };
 
