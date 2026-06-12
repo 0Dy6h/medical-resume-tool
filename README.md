@@ -11,6 +11,7 @@
 - 分析页提供解析器质量 review：按 `parser_name` 聚合岗位量、平均置信度、附件来源、低置信和附件失败事件。
 - 岗位详情保留来源证据：`source_url`、`source_text_hash`、`fetched_at`、`parser_name`，附件解析岗位还保留公告 URL、附件 URL、sheet 和行号。
 - 真实履历约束：简历草稿的强化表达只来自用户结构化字段，并展示匹配证据和缺口。
+- “我的履历”支持从 DOCX、文本型 PDF、TXT、Markdown 和常见图片导入资料；图片/扫描 PDF 的文字识别依赖本机 Tesseract OCR。
 - DOCX/PDF 导出端点。
 
 ## 项目文档

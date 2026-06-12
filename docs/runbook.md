@@ -65,5 +65,6 @@ Public sites can change or rate-limit, so fixture tests remain the stable contra
 
 - The Windows `python` command on this machine points to the Microsoft Store stub. Use `uv run --project backend ...` rather than `python ...`.
 - SQLite connections use a closing connection factory because Windows keeps files locked if connections are not explicitly closed.
+- DOCX/PDF/TXT/Markdown import works with Python dependencies only. Image OCR and scanned-PDF OCR require the Tesseract executable on the host; set `TESSERACT_CMD` if it is not on `PATH`, and set `PROFILE_IMPORT_OCR_LANGUAGES` when using a non-default language pack.
 - Logs from the first implementation session were written to `logs/backend.log` and `logs/frontend.log` when services were started in hidden background processes.
 - On 2026-06-09, Vite dev-server smoke in this environment failed to bind `127.0.0.1:5173` and `127.0.0.1:5174` with `listen EACCES`; frontend `pnpm test`, `pnpm typecheck`, and `pnpm build` still passed. On 2026-06-10, the same local service smoke passed with backend `/health` on port 8000 and Vite on `http://127.0.0.1:5173`. If the bind error recurs, check Windows port reservations/security policy or try another allowed port.
