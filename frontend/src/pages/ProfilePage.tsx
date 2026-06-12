@@ -246,11 +246,16 @@ export function ProfilePage() {
           <input
             ref={fileInputRef}
             type="file"
-            accept=".docx"
+            accept=".docx,.pdf,.txt,.md,.markdown,.png,.jpg,.jpeg,.webp,.bmp,.tif,.tiff"
             style={{ display: "none" }}
             onChange={handleImportFile}
           />
-          <button className="icon-text-button" onClick={() => fileInputRef.current?.click()} disabled={importing}>
+          <button
+            className="icon-text-button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={importing}
+            title="支持 DOCX、PDF、TXT、Markdown 和常见图片"
+          >
             <FileUp size={17} />
             {importing ? "解析中..." : "导入资料"}
           </button>
