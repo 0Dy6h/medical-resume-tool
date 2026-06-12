@@ -31,7 +31,12 @@ ArticleParser = Callable[..., list[ParsedJob]]
 def make_client() -> httpx.AsyncClient:
     """所有适配器共用一套 httpx 客户端配置。"""
     from app.config import config
-    return httpx.AsyncClient(timeout=config.crawl_timeout, follow_redirects=True, headers=_HEADERS)
+    return httpx.AsyncClient(
+        timeout=config.crawl_timeout,
+        follow_redirects=True,
+        headers=_HEADERS,
+        verify=False,  # 允许自签名证书和证书不匹配
+    )
 
 
 def extract_links_by_keyword(

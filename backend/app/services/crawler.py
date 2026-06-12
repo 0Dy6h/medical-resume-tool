@@ -167,13 +167,17 @@ async def crawl_institution(institution: dict[str, Any]) -> list[ParsedJob]:
     from app.config import config
     retries = config.crawl_retries
     base_delay = config.crawl_retry_base_seconds
+    last_error = None
     for attempt in range(retries + 1):
         try:
             return await _crawl_institution_once(institution)
-        except httpx.TransportError:
+        except (httpx.TransportError, httpx.TimeoutException, httpx.HTTPStatusError) as exc:
+            last_error = exc
             if attempt >= retries:
                 raise
             await asyncio.sleep(base_delay * (2**attempt))
+    if last_error:
+        raise last_error
     raise AssertionError("unreachable")
 
 
@@ -230,7 +234,12 @@ def crawl_fixture(institution: dict[str, Any]) -> list[ParsedJob]:
 
 async def crawl_generic(institution: dict[str, Any]) -> list[ParsedJob]:
     url = institution["listing_url"]
-    async with httpx.AsyncClient(timeout=12, follow_redirects=True, headers={"User-Agent": "MedicalJobMVP/0.1"}) as client:
+    async with httpx.AsyncClient(
+        timeout=12,
+        follow_redirects=True,
+        headers={"User-Agent": "MedicalJobMVP/0.1"},
+        verify=False,  # 允许自签名证书
+    ) as client:
         response = await client.get(url)
         response.raise_for_status()
     soup = BeautifulSoup(response.text, "html.parser")

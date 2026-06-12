@@ -101,6 +101,7 @@ async def crawl_z2hospital(institution: dict[str, Any]) -> list[ParsedJob]:
         timeout=20,
         follow_redirects=True,
         headers={"User-Agent": "MedicalJobMVP/0.1"},
+        verify=False,
     ) as client:
         resp = await client.get(listing_url)
         resp.raise_for_status()
