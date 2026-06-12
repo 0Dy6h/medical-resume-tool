@@ -284,12 +284,12 @@
         <div class="pulse" aria-hidden="true"></div>
         <div>
           <h1>医疗岗位情报与真实简历定制工具</h1>
-          <p class="subtitle">项目原理图：从30家种子机构的公开招聘页面和附件(xlsx/xls/pdf)抓取岗位，经分类标签化后沉淀为可追溯数据库，再通过分析引擎生成市场报告；用户注册登录后维护专属真实履历（支持上传docx自动识别），匹配岗位需求生成定制简历草稿，支持DOCX/PDF导出。</p>
+          <p class="subtitle">项目原理图：从30家种子机构的公开招聘页面和附件(xlsx/xls/pdf)抓取岗位，经分类标签化后沉淀为可追溯数据库，再通过分析引擎生成市场报告；用户注册登录后维护专属真实履历（支持上传docx/pdf/txt/markdown/图片自动识别），匹配岗位需求生成定制简历草稿，支持DOCX/PDF导出。爬虫已优化SSL容忍和重试机制。</p>
         </div>
       </div>
       <div class="meta">
-        <div>Stack: FastAPI + SQLite + React/Vite + openpyxl + fpdf2 + python-docx</div>
-        <div>Scope: 多用户MVP · 用户名密码登录 · 12家启用(6 fixture + 6 adapter)</div>
+        <div>Stack: FastAPI + SQLite + React/Vite + openpyxl + fpdf2 + python-docx + pymupdf</div>
+        <div>Scope: 多用户MVP · 用户名密码登录 · 12家启用(6 fixture + 6 adapter) · SSL容忍</div>
         <div>Invariant: 不虚构履历事实 · 每条岗位保留来源证据链 · 履历按用户隔离</div>
       </div>
     </header>
@@ -442,8 +442,8 @@
           <rect class="node-bg" x="610" y="216" width="190" height="80" rx="6"/>
           <rect class="node-rect" x="610" y="216" width="190" height="80"/>
           <text x="630" y="245" class="node-title">crawler.py</text>
-          <text x="630" y="267" class="node-sub">策略分发 + retry</text>
-          <text x="630" y="281" class="tiny">fixture / adapter / generic</text>
+          <text x="630" y="267" class="node-sub">策略分发 + 3次重试</text>
+          <text x="630" y="281" class="tiny">SSL容忍 · 30s超时 · 指数退避</text>
         </g>
 
         <g class="node backend">
@@ -589,10 +589,11 @@
           <h3>数据入口</h3>
         </div>
         <ul>
-          <li>• 前6家机构走deterministic fixture保证演示稳定,另6家启用专用官网适配器。</li>
+          <li>• 前6家机构走deterministic fixture保证演示稳定,另6家启用专用官网适配器(nfyy/z2hospital/bjmu/chinacdc/hrbmu/njmu)。</li>
           <li>• 支持从招聘公告页面发现并解析公开xlsx/xls附件为行级岗位,PDF附件记录证据待扩展。</li>
           <li>• bjmu/chinacdc已实现附件解析,njmu/hrbmu实现附件发现,nfyy/z2hospital解析静态公告页。</li>
           <li>• 通用解析器作为兜底,所有岗位保留parser_name和confidence供质量review。</li>
+          <li>• httpx客户端已配置verify=False(容忍SSL证书问题)、3次重试(1s起始指数退避)、30s超时,应对医院官网不稳定性。</li>
         </ul>
       </div>
       <div class="card">
@@ -602,11 +603,12 @@
         </div>
         <ul>
           <li>• 抓取→解析→分类标签→去重→入库全流程在FastAPI后端完成,支持批量和单机构触发,抓取后台执行+前端轮询进度。</li>
+          <li>• 爬虫已优化为SSL容忍(自签名证书/主机名不匹配)、3次重试(指数退避)、30s超时,提升不稳定医院官网的成功率。</li>
           <li>• SQLite持久化users/institutions/crawl_runs/jobs/profiles/resume_drafts/reports七张主表,profiles与resume_drafts按user_id隔离。</li>
           <li>• 分析引擎按岗位类别/学历/地区/机构类型/能力标签聚合,生成Markdown+HTML报告。</li>
           <li>• 简历生成将结构化履历字段扁平化后与岗位需求规则匹配,输出sections/evidence/gaps三层结构。</li>
-          <li>• 用户可手动填写或上传docx简历自动识别(规则解析,无LLM),预览勾选后合并入履历。</li>
-          <li>• 前端React/Vite工作台通过REST API完成登录/总览/岗位库/分析/履历/简历生成/抓取任务全流程。</li>
+          <li>• 用户可手动填写或上传简历自动识别(规则解析,无LLM),预览勾选后合并入履历。profile_import已重构为模块(extraction/normalization/adapter),前端UI支持多格式上传(.docx/.pdf/.txt/.md/图片),后端当前仅处理docx。</li>
+          <li>• 前端React/Vite工作台通过REST API完成登录/总览/岗位库/分析/履历/简历生成/抓取任务全流程。登录页已重新设计为左右分栏布局(品牌标识+特性网格+登录表单)。</li>
         </ul>
       </div>
       <div class="card">
@@ -619,6 +621,7 @@
           <li>• 简历草稿只重组用户提供的结构化字段(education/experiences/projects/publications/teaching/awards/certificates/skills/languages),每项标注profile_field_id。已移除个人信息字段,所有部分非必填。</li>
           <li>• 无履历证据的岗位要求进入gaps数组,明确提示"未在你的履历中找到对应证据",绝不编造经历/项目/成果/证书。</li>
           <li>• 分析服务parser_quality维度按解析器聚合jobs/low_confidence_jobs/attachment_sourced_jobs/failed_attachment_events和平均置信度,标记review/watch/stable三档供人工抽样质检。</li>
+          <li>• profile_import模块已重构:extraction(文本提取)→normalization(规则解析)→adapter(契约转换),返回review_items/unassigned_blocks/import_meta供前端预览,确保用户知晓识别质量。</li>
         </ul>
       </div>
     </section>
