@@ -55,13 +55,25 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   if (response.status === 401) {
     setToken(null);
     onUnauthorized?.();
-    throw new UnauthorizedError(await response.text() || "请先登录");
+    throw new UnauthorizedError(await errorMessage(response, "请先登录"));
   }
   if (!response.ok) {
-    const detail = await response.text();
-    throw new Error(detail || `Request failed: ${response.status}`);
+    throw new Error(await errorMessage(response, `Request failed: ${response.status}`));
   }
   return (await response.json()) as T;
+}
+
+async function errorMessage(response: Response, fallback: string): Promise<string> {
+  const text = await response.text();
+  if (!text) return fallback;
+  try {
+    const parsed = JSON.parse(text) as { detail?: unknown };
+    if (typeof parsed.detail === "string") return parsed.detail;
+    if (Array.isArray(parsed.detail)) return parsed.detail.map((item) => String(item.msg ?? item)).join("；");
+  } catch {
+    return text;
+  }
+  return text;
 }
 
 export const api = {
@@ -111,7 +123,7 @@ export const api = {
       onUnauthorized?.();
       throw new UnauthorizedError();
     }
-    if (!response.ok) throw new Error(await response.text());
+    if (!response.ok) throw new Error(await errorMessage(response, "导入失败"));
     return (await response.json()) as ProfileImportResult;
   },
   createResumeDraft: (jobId: number) =>
@@ -139,7 +151,7 @@ export const api = {
       onUnauthorized?.();
       throw new UnauthorizedError();
     }
-    if (!response.ok) throw new Error(await response.text());
+    if (!response.ok) throw new Error(await errorMessage(response, "导出失败"));
     return response.blob();
   }
 };
@@ -152,4 +164,3 @@ export function downloadBlob(blob: Blob, fileName: string) {
   anchor.click();
   URL.revokeObjectURL(url);
 }
-
