@@ -1,0 +1,2 @@
+# 部署包用 git archive 产出，不应把历史部署 zip 再打进新包
+*.zip export-ignore
