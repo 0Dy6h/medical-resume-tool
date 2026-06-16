@@ -1,5 +1,31 @@
 # 履历导入优化 - 开发日志
 
+## 2026-06-16 进度 — 阶段3 已完成 ✅
+
+**目标已达成**：无板块标题的简历也能识别事实。导入端点从 heading-only parser 切换到新管线。
+
+**新增文件**：
+- `blocks.py`：`build_blocks(lines)` → `list[DocumentBlock]`，复用 `merge_bullets_with_parent`/`normalize_heading`/`normalize_time_range`；标题只作 `section_hint` 加分，不作准入门槛；年份起始行与独立事实行触发分块。
+- `extractors.py`：按实体信号识别 education/experiences/projects/certificates/languages/skills/publications/awards/teaching，复用 legacy 的 `_build_*` 构造器；技能也从工作/项目 highlights 抽取。
+- `scoring.py`：置信度打分（基础 0.4 + 各信号加权）。
+- `pipeline.py`：`build_profile_contract(lines, warnings)`，`>=0.75` 自动结构化、`0.45-0.75` 进 `review_items`、更低进 `unassigned_blocks`；`import_meta.extractor_name = "fact-extractor-v1"`。
+
+**接线**：
+- `main.py` 导入端点改用 `build_profile_contract`（`extract_profile_text` 提取层未动，OCR/PDF/图片不变）。
+- 前端 `ProfilePage.tsx` 新增「待确认」区（review_items 默认不勾选，确认并入对应 collection）+「未归类原文」折叠区。
+- `extraction.py` 仅加注释说明为未来结构化升级预留，未合并/未删。
+
+**验收**：`pytest -q` 86 通过（原 83 + 3）；`test_extractors.py` 强断言验收样例逐字段通过；前端 typecheck/test/build 通过。
+
+**已知边界（v1 规则抽取，待真实简历迭代）**：
+- 证书 GCP 名称做了特判美化（`extractors.py` `_certificate_fact`）。
+- 含「项目/课题/队列」的块会优先判为 project 而非 experience，真实工作经历若提及项目可能错路由。
+- 技能词表 `\bR\b`、`统计`、`随访`、`伦理` 等较宽，可能误命中。
+- 教育经历无可解析时间时置信度 0.65 → 进 review（不自动导入），属保守设计。
+- `legacy_to_contract`/`parse_profile_from_lines` 已无生产调用方（仍导出+被旧测试覆盖），保留。
+
+---
+
 ## 2026-06-11 进度
 
 ### 已完成：阶段1 + 阶段2（共2个阶段）

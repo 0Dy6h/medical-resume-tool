@@ -65,6 +65,19 @@ def sample_resume_text() -> str:
     )
 
 
+def sample_unsectioned_resume_text() -> str:
+    return "\n".join(
+        [
+            "2021.09-2024.06 复旦大学 临床医学 硕士",
+            "2023.01-2024.06 上海某三甲医院 临床研究中心 科研助理",
+            "参与伦理材料整理、维护随访数据库、使用SPSS完成统计分析",
+            "慢病队列随访项目 项目成员 完成300例随访记录核查,输出数据质量报告",
+            "已取得GCP证书、大学英语六级",
+            "熟悉 Python、R语言、SPSS、数据清洗",
+        ]
+    )
+
+
 def sample_resume_pdf() -> bytes:
     font_path = _find_cjk_font()
     if font_path is None:
@@ -160,6 +173,28 @@ def test_import_endpoint_accepts_plain_text(tmp_path):
     payload = response.json()
     assert payload["education"][0]["school"] == "复旦大学"
     assert {item["name"] for item in payload["skills"]} >= {"SPSS", "Python", "数据管理"}
+
+
+def test_import_endpoint_accepts_unsectioned_plain_text(tmp_path):
+    client = make_client(tmp_path)
+    auth = auth_headers(client)
+    response = client.post(
+        "/api/profile/import",
+        files={"file": ("resume.txt", sample_unsectioned_resume_text().encode("utf-8"), "text/plain")},
+        headers=auth,
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["import_meta"]["extractor_name"] == "fact-extractor-v1"
+    assert payload["education"][0]["school"] == "复旦大学"
+    assert payload["experiences"][0]["organization"] == "上海某三甲医院"
+    assert payload["projects"][0]["name"] == "慢病队列随访项目"
+    assert payload["certificates"][0]["name"] == "GCP证书"
+    assert payload["languages"][0]["level"] == "六级"
+    assert {item["name"] for item in payload["skills"]} >= {"Python", "R语言", "SPSS", "数据清洗", "伦理", "随访"}
+    assert payload["review_items"] == []
+    assert payload["unassigned_blocks"] == []
 
 
 def test_import_endpoint_accepts_markdown(tmp_path):

@@ -1,3 +1,4 @@
+# 结构化按格式提取，预留给未来升级，当前线上管线走 lines+blocks。
 """增强的文档提取：DOCX、PDF、Markdown、文本。"""
 from __future__ import annotations
 

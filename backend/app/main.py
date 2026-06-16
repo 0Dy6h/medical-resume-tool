@@ -31,7 +31,7 @@ from app.services.auth import hash_password, make_token, verify_password, verify
 from app.services.crawler import execute_crawl_run
 from app.services.database import DatabaseEngine, create_engine, init_db
 from app.services.exporter import export_docx, export_pdf
-from app.services.profile_import import ProfileImportError, extract_profile_text, legacy_to_contract, parse_profile_from_lines
+from app.services.profile_import import ProfileImportError, build_profile_contract, extract_profile_text
 from app.services.repositories import (
     create_crawl_run,
     create_user,
@@ -206,8 +206,7 @@ def create_app(database_url: str | None = None) -> FastAPI:
             extraction = extract_profile_text(file.filename or "", content)
         except ProfileImportError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from None
-        parsed = parse_profile_from_lines(extraction.lines)
-        contract = legacy_to_contract(parsed, extraction.warnings)
+        contract = build_profile_contract(extraction.lines, extraction.warnings)
         return contract.to_dict()
 
     @app.post("/api/resume-drafts", response_model=ResumeDraftOut, status_code=201)

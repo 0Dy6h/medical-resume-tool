@@ -344,6 +344,58 @@ button:disabled {
   margin-top: 2px;
 }
 
+.review-row {
+  align-items: flex-start;
+  justify-content: flex-start;
+}
+
+.review-row input {
+  width: auto;
+  margin-top: 3px;
+}
+
+.review-content {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+}
+
+.review-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.review-header strong {
+  color: var(--ink);
+}
+
+.review-confidence,
+.review-summary,
+.review-source {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.review-source {
+  color: #495551;
+}
+
+.unassigned-blocks {
+  margin-top: 16px;
+}
+
+.unassigned-blocks summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+
 .row-meta {
   min-width: 190px;
   text-align: right;

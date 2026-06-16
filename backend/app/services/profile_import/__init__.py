@@ -14,6 +14,7 @@ from app.services.profile_import.legacy import (
     ProfileImportError,
     ProfileTextExtraction,
 )
+from app.services.profile_import.pipeline import build_profile_contract
 
 __all__ = [
     "ExtractedFact",
@@ -23,6 +24,7 @@ __all__ = [
     "extract_profile_text",
     "parse_profile_from_lines",
     "legacy_to_contract",
+    "build_profile_contract",
     "ProfileImportError",
     "ProfileTextExtraction",
 ]

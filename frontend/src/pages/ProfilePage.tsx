@@ -17,6 +17,8 @@ type CollectionConfig = {
   fields: Field[];
 };
 
+type PreviewReviewItem = NonNullable<ProfileImportResult["review_items"]>[number];
+
 const configs: CollectionConfig[] = [
   {
     key: "education",
@@ -107,6 +109,8 @@ const configs: CollectionConfig[] = [
   }
 ];
 
+const configByKey = new Map(configs.map((config) => [config.key, config] as const));
+
 function newId(prefix: string) {
   return `${prefix}-${Math.random().toString(16).slice(2, 8)}`;
 }
@@ -119,6 +123,10 @@ function textValue(value: unknown) {
 function toStoredValue(value: string, area?: boolean) {
   if (!area) return value;
   return value.split(/\n+/).map((item) => item.trim()).filter(Boolean);
+}
+
+function collectionTitle(collection: string) {
+  return configByKey.get(collection as keyof Profile)?.title ?? collection;
 }
 
 export function ProfilePage() {
@@ -158,10 +166,13 @@ export function ProfilePage() {
           keys.add(`${String(config.key)}-${index}`);
         });
       });
+      const reviewCount = result.review_items?.length ?? 0;
       setPreview(result);
       setSelectedKeys(keys);
-      if (keys.size === 0) {
+      if (keys.size === 0 && reviewCount === 0) {
         toast.info("未识别出可导入的条目，请检查文档结构");
+      } else if (keys.size === 0 && reviewCount > 0) {
+        toast.info("有待确认条目，请在预览中勾选后导入");
       }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "导入失败");
@@ -193,6 +204,15 @@ export function ProfilePage() {
           count += accepted.length;
           next[config.key] = [...((current[config.key] as Array<Record<string, unknown>>) ?? []), ...accepted] as never;
         }
+      });
+      (preview.review_items ?? []).forEach((item, index) => {
+        const key = `review-${index}`;
+        if (!selectedKeys.has(key)) return;
+        const config = configByKey.get(item.collection as keyof Profile);
+        if (!config) return;
+        const accepted = { ...item.item, id: newId(item.collection) };
+        count += 1;
+        next[config.key] = [...((current[config.key] as Array<Record<string, unknown>>) ?? []), accepted] as never;
       });
       return next;
     });
@@ -314,6 +334,46 @@ export function ProfilePage() {
               </div>
             );
           })}
+          {(preview.review_items ?? []).length > 0 && (
+            <div>
+              <h3>待确认（{preview.review_items?.length ?? 0}）</h3>
+              <div className="compact-list">
+                {preview.review_items?.map((item: PreviewReviewItem, index) => {
+                  const key = `review-${index}`;
+                  const config = configByKey.get(item.collection as keyof Profile);
+                  return (
+                    <label className="compact-row review-row" key={key}>
+                      <input
+                        type="checkbox"
+                        checked={selectedKeys.has(key)}
+                        onChange={() => toggleSelected(key)}
+                      />
+                      <div className="review-content">
+                        <div className="review-header">
+                          <strong>{collectionTitle(item.collection)}</strong>
+                          <span className="review-confidence">置信度 {item.confidence.toFixed(2)}</span>
+                        </div>
+                        <div className="review-summary">{previewItemSummary(config ?? configs[0], item.item) || "（空条目）"}</div>
+                        <div className="review-source">{item.source_text}</div>
+                      </div>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+          {(preview.unassigned_blocks ?? []).length > 0 && (
+            <details className="unassigned-blocks">
+              <summary>未归类原文（{preview.unassigned_blocks?.length ?? 0}）</summary>
+              <div className="compact-list">
+                {preview.unassigned_blocks?.map((block, index) => (
+                  <div className="gap-card" key={`${block.text}-${index}`}>
+                    {block.text}
+                  </div>
+                ))}
+              </div>
+            </details>
+          )}
         </section>
       )}
 
