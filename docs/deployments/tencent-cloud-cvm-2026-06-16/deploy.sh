@@ -4,6 +4,11 @@
 
 set -e  # 遇到错误立即退出
 
+# 非交互式 SSH（ssh host 'bash deploy.sh'）不加载 ~/.profile / ~/.bashrc，
+# 而 uv 装在 ~/.local/bin，不在默认 PATH。systemd 服务用 uv 绝对路径不受影响，
+# 但脚本里的 uv sync / uv run 会 command not found，故在此手动补上。
+export PATH="$HOME/.local/bin:$PATH"
+
 DEPLOY_ZIP="${1:-/tmp/medical-resume-tool-deploy-2026-06-16.zip}"
 INSTALL_DIR="/opt/medical-resume-tool"
 BACKUP_DIR="/opt/backups/medical-resume-tool-$(date +%F-%H%M%S)"
