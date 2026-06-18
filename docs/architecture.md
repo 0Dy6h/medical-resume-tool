@@ -2,7 +2,7 @@
 
 ## Summary
 
-The MVP is a local web application with a FastAPI backend, SQLite persistence, and a React/Vite frontend. The backend owns crawling, parsing, classification, analytics, profile storage, resume draft generation, report generation, and exports. The frontend is a dense workbench for individual job seekers.
+The MVP is a local web application with a FastAPI backend, SQLite persistence, and a React/Vite frontend. The backend owns crawling, parsing, classification, analytics, username/password authentication, user-scoped profile storage, private job workflow state, resume draft generation, report generation, and exports. The frontend is a dense workbench for individual job seekers.
 
 ## Data Flow
 
@@ -12,38 +12,48 @@ The MVP is a local web application with a FastAPI backend, SQLite persistence, a
 4. Attachment-aware adapters discover public `.xlsx`, `.xls`, and `.pdf` links. `.xlsx/.xls` tables can produce row-level jobs; PDF links are currently recorded as evidence only.
 5. Parsed jobs are normalized, tagged, hashed, and upserted into SQLite.
 6. Analytics reads the current job table and computes category, education, region, capability, institution-focus, and parser-quality aggregates.
-7. The profile form saves structured user facts as JSON.
-8. Resume generation matches job requirements against profile facts and stores only sourced evidence.
-9. Exports render the stored draft as DOCX or PDF.
+7. Login/register issues signed bearer tokens for private profile, import, draft, export, and job-status endpoints.
+8. The profile form saves structured user facts as JSON under the signed-in user.
+9. Optional per-user job status stores private triage state, notes, and deadlines without changing public job records.
+10. Resume generation matches job requirements against profile facts and stores only sourced evidence.
+11. Exports render the stored draft as DOCX or PDF. Application exports omit internal gap diagnostics by default; diagnostic exports are explicit.
 
 ## Main Tables
 
 - `institutions` - seed source metadata and last crawl status.
 - `crawl_runs` - crawl execution summary and error list.
 - `jobs` - normalized job records, raw snapshots, tags, parser metadata, confidence.
-- `profiles` - single local structured profile.
-- `resume_drafts` - generated sections, evidence, and gaps.
+- `users` - local username/password accounts.
+- `profiles` - one structured profile per user.
+- `job_statuses` - private per-user job triage state, note, and deadline.
+- `resume_drafts` - user-scoped generated sections, evidence, and gaps.
 - `reports` - generated Markdown/HTML market reports.
 
 ## API Surface
 
+- `POST /api/auth/register`
+- `POST /api/auth/login`
+- `GET /api/auth/me`
 - `GET /api/institutions`
 - `POST /api/crawl-runs`
 - `GET /api/crawl-runs/{id}`
 - `GET /api/jobs`
 - `GET /api/jobs/{id}`
+- `PUT /api/jobs/{job_id}/status`
+- `DELETE /api/jobs/{job_id}/status`
 - `GET /api/analytics/summary`
 - `POST /api/reports`
 - `GET /api/profile`
 - `PUT /api/profile`
+- `POST /api/profile/import`
 - `POST /api/resume-drafts`
 - `GET /api/resume-drafts/{id}`
 - `PUT /api/resume-drafts/{id}`
-- `POST /api/resume-drafts/{id}/export?format=docx|pdf`
+- `POST /api/resume-drafts/{id}/export?format=docx|pdf&mode=application|diagnostic`
 
 ## Resume Truth Constraint
 
-The resume generator flattens the structured profile into facts with `profile_field_id`, matches requirements by rule-based keyword overlap, and writes every evidence item with a `profile_field_id`. Gaps use the wording `未在你的履历中找到对应证据` and do not suggest fabrication.
+The resume generator flattens the structured profile into facts with `profile_field_id`, matches requirements by rule-based keyword overlap, and writes every evidence item with a `profile_field_id`, readable `source_label`, `matched_terms`, and `evidence_strength`. Gaps use the wording `未在你的履历中找到对应证据` and do not suggest fabrication.
 
 ## Current Source Strategy
 

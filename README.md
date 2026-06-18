@@ -19,7 +19,8 @@
 - 架构说明：`docs/architecture.md`
 - 运维/启动手册：`docs/runbook.md`
 - Agent 接手规则：`AGENTS.md`
-- 当前交接：`docs/handoffs/2026-06-09-attachment-aware-data-loop.md`
+- 当前交接：`docs/handoffs/2026-06-18-end-of-day.md`
+- 当前线上部署记录：`docs/deployments/tencent-cloud-cvm-2026-06-18/README.md`
 
 ## 后端
 
