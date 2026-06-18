@@ -149,6 +149,17 @@ def init_db(engine: DatabaseEngine) -> None:
                 updated_at TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS job_statuses (
+                user_id INTEGER NOT NULL REFERENCES users(id),
+                job_id INTEGER NOT NULL REFERENCES jobs(id),
+                status TEXT NOT NULL,
+                note TEXT,
+                deadline TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (user_id, job_id)
+            );
+
             CREATE TABLE IF NOT EXISTS reports (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 title TEXT NOT NULL,
@@ -159,6 +170,7 @@ def init_db(engine: DatabaseEngine) -> None:
             );
             """
         )
+        _migrate_user_scoped_tables(conn)
         count = conn.execute("SELECT COUNT(*) AS count FROM institutions").fetchone()["count"]
         if count == 0:
             conn.executemany(
@@ -174,3 +186,70 @@ def init_db(engine: DatabaseEngine) -> None:
                 [{**item, "enabled": 1 if item["enabled"] else 0} for item in SEED_INSTITUTIONS],
             )
         conn.commit()
+
+
+def _table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
+    allowed_tables = {"profiles", "resume_drafts"}
+    if table not in allowed_tables:
+        raise ValueError(f"Unsupported table for schema inspection: {table}")
+    return {row["name"] for row in conn.execute(f'PRAGMA table_info("{table}")').fetchall()}
+
+
+def _migrate_user_scoped_tables(conn: sqlite3.Connection) -> None:
+    profile_columns = _table_columns(conn, "profiles")
+    if profile_columns and "user_id" not in profile_columns and {"id", "data", "updated_at"}.issubset(profile_columns):
+        conn.executescript(
+            """
+            ALTER TABLE profiles RENAME TO profiles_legacy;
+
+            CREATE TABLE profiles (
+                user_id INTEGER PRIMARY KEY REFERENCES users(id),
+                data TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            INSERT INTO profiles (user_id, data, updated_at)
+            SELECT id, data, updated_at
+            FROM profiles_legacy
+            WHERE EXISTS (SELECT 1 FROM users WHERE users.id = profiles_legacy.id);
+
+            DELETE FROM profiles_legacy
+            WHERE EXISTS (SELECT 1 FROM users WHERE users.id = profiles_legacy.id);
+            """
+        )
+        remaining_profiles = conn.execute("SELECT COUNT(*) AS count FROM profiles_legacy").fetchone()["count"]
+        if remaining_profiles == 0:
+            conn.execute("DROP TABLE profiles_legacy")
+
+    draft_columns = _table_columns(conn, "resume_drafts")
+    if draft_columns and "user_id" not in draft_columns and {"profile_id", "job_id", "title", "sections", "evidence", "gaps", "created_at", "updated_at"}.issubset(draft_columns):
+        conn.executescript(
+            """
+            ALTER TABLE resume_drafts RENAME TO resume_drafts_legacy;
+
+            CREATE TABLE resume_drafts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL REFERENCES users(id),
+                job_id INTEGER NOT NULL REFERENCES jobs(id),
+                title TEXT NOT NULL,
+                sections TEXT NOT NULL,
+                evidence TEXT NOT NULL,
+                gaps TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            INSERT INTO resume_drafts (id, user_id, job_id, title, sections, evidence, gaps, created_at, updated_at)
+            SELECT id, CAST(profile_id AS INTEGER), job_id, title, sections, evidence, gaps, created_at, updated_at
+            FROM resume_drafts_legacy
+            WHERE EXISTS (SELECT 1 FROM users WHERE users.id = CAST(resume_drafts_legacy.profile_id AS INTEGER))
+              AND EXISTS (SELECT 1 FROM jobs WHERE jobs.id = resume_drafts_legacy.job_id);
+
+            DELETE FROM resume_drafts_legacy
+            WHERE EXISTS (SELECT 1 FROM users WHERE users.id = CAST(resume_drafts_legacy.profile_id AS INTEGER))
+              AND EXISTS (SELECT 1 FROM jobs WHERE jobs.id = resume_drafts_legacy.job_id);
+            """
+        )
+        remaining_drafts = conn.execute("SELECT COUNT(*) AS count FROM resume_drafts_legacy").fetchone()["count"]
+        if remaining_drafts == 0:
+            conn.execute("DROP TABLE resume_drafts_legacy")

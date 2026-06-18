@@ -2,6 +2,7 @@ import { Download, FileDown, RefreshCcw, Save, WandSparkles } from "lucide-react
 import { useEffect, useState } from "react";
 import { useToast } from "../components/Toast";
 import { api, downloadBlob } from "../lib/api";
+import { evidenceSourceLabel, evidenceStrengthLabel, evidenceStrengthTone } from "../lib/resumeEvidence";
 import type { Job, ResumeDraft, ResumeSection } from "../types";
 
 export function ResumePage() {
@@ -48,13 +49,13 @@ export function ResumePage() {
     window.setTimeout(() => setSaved(false), 1500);
   }
 
-  async function exportDraft(format: "docx" | "pdf") {
+  async function exportDraft(format: "docx" | "pdf", mode: "application" | "diagnostic" = "application") {
     if (!draft) return;
     setExporting(true);
     try {
       await saveDraft();
-      const blob = await api.exportResume(draft.id, format);
-      downloadBlob(blob, `resume-${draft.id}.${format}`);
+      const blob = await api.exportResume(draft.id, format, mode);
+      downloadBlob(blob, `resume-${draft.id}-${mode}.${format}`);
       toast.success(`已导出 ${format.toUpperCase()}`);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "导出失败");
@@ -128,11 +129,15 @@ export function ResumePage() {
                 </button>
                 <button className="icon-text-button" onClick={() => void exportDraft("docx")} disabled={exporting}>
                   <Download size={17} />
-                  {exporting ? "导出中..." : "DOCX"}
+                  {exporting ? "导出中..." : "投递 DOCX"}
                 </button>
                 <button className="icon-text-button" onClick={() => void exportDraft("pdf")} disabled={exporting}>
                   <FileDown size={17} />
-                  {exporting ? "导出中..." : "PDF"}
+                  {exporting ? "导出中..." : "投递 PDF"}
+                </button>
+                <button className="icon-text-button" onClick={() => void exportDraft("docx", "diagnostic")} disabled={exporting}>
+                  <Download size={17} />
+                  诊断 DOCX
                 </button>
               </div>
             </div>
@@ -154,13 +159,26 @@ export function ResumePage() {
               {draft.evidence.length === 0 ? (
                 <div className="empty-line">暂无匹配证据</div>
               ) : (
-                draft.evidence.map((item, index) => (
-                  <div className="evidence-card" key={`${item.profile_field_id}-${index}`}>
-                    <strong>{String(item.requirement)}</strong>
-                    <span>{String(item.profile_field_id)}</span>
-                    <p>{String(item.source_text)}</p>
-                  </div>
-                ))
+                draft.evidence.map((item, index) => {
+                  const matchedTerms = Array.isArray(item.matched_terms) ? item.matched_terms.map(String) : [];
+                  return (
+                    <div className="evidence-card" key={`${item.profile_field_id}-${index}`}>
+                      <div className="evidence-card-head">
+                        <strong>{String(item.requirement)}</strong>
+                        <span className={`status ${evidenceStrengthTone(String(item.evidence_strength ?? ""))}`}>
+                          {evidenceStrengthLabel(String(item.evidence_strength ?? ""))}
+                        </span>
+                      </div>
+                      <span>{evidenceSourceLabel(item)}</span>
+                      <p>{String(item.source_text)}</p>
+                      {matchedTerms.length > 0 && (
+                        <div className="tag-row evidence-terms">
+                          {matchedTerms.map((term) => <span className="tag" key={term}>{term}</span>)}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
               )}
             </div>
             <h2>缺口</h2>
@@ -179,4 +197,3 @@ export function ResumePage() {
     </div>
   );
 }
-

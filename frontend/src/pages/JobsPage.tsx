@@ -1,11 +1,19 @@
-import { ExternalLink, RefreshCcw, Search } from "lucide-react";
+import { BookmarkCheck, BookmarkPlus, ExternalLink, RefreshCcw, Search, X } from "lucide-react";
 import { useEffect, useState } from "react";
+import { StatusPill } from "../components/StatusPill";
 import { useToast } from "../components/Toast";
 import { api } from "../lib/api";
 import { formatDate } from "../lib/format";
 import type { Job, JobDetail } from "../types";
 
 const EDUCATION_LEVELS = ["博士", "硕士", "本科", "大专"];
+const JOB_STATUS_OPTIONS = [
+  { value: "saved", label: "收藏" },
+  { value: "evaluating", label: "评估中" },
+  { value: "preparing", label: "准备中" },
+  { value: "applied", label: "已投递" },
+  { value: "archived", label: "归档" }
+];
 
 export function JobsPage() {
   const PAGE_SIZE = 50;
@@ -22,6 +30,9 @@ export function JobsPage() {
   const [page, setPage] = useState(0);
   const [detail, setDetail] = useState<JobDetail | null>(null);
   const [loading, setLoading] = useState(false);
+  const [statusValue, setStatusValue] = useState("saved");
+  const [statusNote, setStatusNote] = useState("");
+  const [statusDeadline, setStatusDeadline] = useState("");
 
   async function refresh(targetPage = page) {
     setLoading(true);
@@ -39,7 +50,9 @@ export function JobsPage() {
       setTotal(payload.total);
       setPage(targetPage);
       if (payload.items.length && !detail) {
-        setDetail(await api.job(payload.items[0].id));
+        const firstDetail = await api.job(payload.items[0].id);
+        setDetail(firstDetail);
+        syncStatusForm(firstDetail);
       }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "加载岗位失败");
@@ -54,9 +67,46 @@ export function JobsPage() {
 
   async function selectJob(job: Job) {
     try {
-      setDetail(await api.job(job.id));
+      const payload = await api.job(job.id);
+      setDetail(payload);
+      syncStatusForm(payload);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "加载岗位详情失败");
+    }
+  }
+
+  function syncStatusForm(job: JobDetail | null) {
+    setStatusValue(job?.user_status?.status ?? "saved");
+    setStatusNote(job?.user_status?.note ?? "");
+    setStatusDeadline(job?.user_status?.deadline ?? "");
+  }
+
+  async function saveStatus() {
+    if (!detail) return;
+    try {
+      const userStatus = await api.saveJobStatus(detail.id, {
+        status: statusValue,
+        note: statusNote.trim() || null,
+        deadline: statusDeadline.trim() || null
+      });
+      setDetail({ ...detail, user_status: userStatus });
+      setJobs((current) => current.map((job) => (job.id === detail.id ? { ...job, user_status: userStatus } : job)));
+      toast.success("岗位状态已保存");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "保存岗位状态失败");
+    }
+  }
+
+  async function clearStatus() {
+    if (!detail) return;
+    try {
+      await api.clearJobStatus(detail.id);
+      setDetail({ ...detail, user_status: null });
+      setJobs((current) => current.map((job) => (job.id === detail.id ? { ...job, user_status: null } : job)));
+      syncStatusForm(null);
+      toast.success("已清除岗位状态");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "清除岗位状态失败");
     }
   }
 
@@ -128,13 +178,14 @@ export function JobsPage() {
               <th>机构</th>
               <th>类别</th>
               <th>学历</th>
+              <th>状态</th>
               <th>标签</th>
             </tr>
           </thead>
           <tbody>
             {jobs.length === 0 ? (
               <tr>
-                <td colSpan={5} className="loading-line">
+                <td colSpan={6} className="loading-line">
                   {loading ? "加载中…" : "未找到匹配岗位"}
                 </td>
               </tr>
@@ -145,6 +196,7 @@ export function JobsPage() {
                   <td>{job.institution_name}</td>
                   <td>{job.job_category}</td>
                   <td>{job.education}</td>
+                  <td>{job.user_status ? <StatusPill value={job.user_status.status} /> : <span className="subtle">未评估</span>}</td>
                   <td>
                     <div className="tag-row">
                       {job.tags.slice(0, 4).map((tag) => <span className="tag" key={tag}>{tag}</span>)}
@@ -198,6 +250,40 @@ export function JobsPage() {
               <span>置信度</span><strong>{Math.round(detail.confidence * 100)}%</strong>
               <span>抓取时间</span><strong>{formatDate(detail.fetched_at)}</strong>
             </div>
+            <section className="job-action-panel">
+              <div className="panel-head compact-head">
+                <h3>投递决策</h3>
+                {detail.user_status ? <StatusPill value={detail.user_status.status} /> : <span className="status idle">未评估</span>}
+              </div>
+              <div className="status-form">
+                <label>
+                  <span>状态</span>
+                  <select value={statusValue} onChange={(event) => setStatusValue(event.target.value)}>
+                    {JOB_STATUS_OPTIONS.map((option) => (
+                      <option value={option.value} key={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  <span>截止/提醒</span>
+                  <input value={statusDeadline} onChange={(event) => setStatusDeadline(event.target.value)} placeholder="如 2026-07-01" />
+                </label>
+                <label className="span-2">
+                  <span>备注</span>
+                  <textarea value={statusNote} onChange={(event) => setStatusNote(event.target.value)} placeholder="记录投递材料、联系人或复核点" />
+                </label>
+              </div>
+              <div className="button-row">
+                <button className="primary-button" onClick={() => void saveStatus()}>
+                  {detail.user_status ? <BookmarkCheck size={17} /> : <BookmarkPlus size={17} />}
+                  保存状态
+                </button>
+                <button className="icon-text-button" onClick={() => void clearStatus()} disabled={!detail.user_status}>
+                  <X size={17} />
+                  清除
+                </button>
+              </div>
+            </section>
             <h3>职责</h3>
             <p>{detail.responsibilities}</p>
             <h3>要求</h3>

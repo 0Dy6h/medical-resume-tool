@@ -46,6 +46,16 @@ export type Job = {
   fetched_at: string;
   parser_name: string;
   confidence: number;
+  user_status?: JobUserStatus | null;
+};
+
+export type JobUserStatus = {
+  job_id: number;
+  status: "saved" | "evaluating" | "preparing" | "applied" | "archived" | string;
+  note?: string | null;
+  deadline?: string | null;
+  created_at: string;
+  updated_at: string;
 };
 
 export type JobDetail = Job & {

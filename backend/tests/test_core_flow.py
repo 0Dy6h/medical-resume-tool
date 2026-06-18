@@ -1,5 +1,6 @@
 import io
 import time
+import zipfile
 from pathlib import Path
 
 import httpx
@@ -8,7 +9,8 @@ from fastapi.testclient import TestClient
 from app.main import create_app
 from app.services import crawler as crawler_module
 from app.services.crawler import ParsedJob
-from app.services.database import connect, init_db, reset_db
+from app.services.database import connect, create_engine, init_db, reset_db
+from app.services.repositories import get_profile, get_resume_draft
 
 
 def make_client(tmp_path: Path) -> TestClient:
@@ -43,6 +45,175 @@ def auth_headers(client: TestClient, username: str = "tester", password: str = "
     response = client.post("/api/auth/register", json={"username": username, "password": password})
     assert response.status_code == 201, response.text
     return {"Authorization": f"Bearer {response.json()['token']}"}
+
+
+def docx_document_xml(content: bytes) -> str:
+    with zipfile.ZipFile(io.BytesIO(content)) as zf:
+        return zf.read("word/document.xml").decode("utf-8")
+
+
+def test_init_db_migrates_legacy_user_scoped_tables(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'legacy.db'}")
+    with connect(engine) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL UNIQUE,
+                password_hash TEXT NOT NULL,
+                password_salt TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+
+            INSERT INTO users (id, username, password_hash, password_salt, created_at)
+            VALUES (1, 'legacy-user', 'hash', 'salt', '2026-06-18T00:00:00+00:00');
+
+            CREATE TABLE profiles (
+                id INTEGER PRIMARY KEY,
+                data TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            INSERT INTO profiles (id, data, updated_at)
+            VALUES (1, '{"skills":[{"id":"skill-1","name":"临床研究"}]}', '2026-06-18T00:00:00+00:00');
+
+            CREATE TABLE institutions (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL,
+                institution_type TEXT NOT NULL,
+                region TEXT NOT NULL,
+                official_url TEXT NOT NULL,
+                listing_url TEXT NOT NULL,
+                crawl_strategy TEXT NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                last_crawled_at TEXT,
+                last_status TEXT DEFAULT 'never',
+                last_error TEXT
+            );
+
+            INSERT INTO institutions (
+                id, name, institution_type, region, official_url, listing_url, crawl_strategy, enabled
+            ) VALUES (
+                1, '旧机构', '医院', '上海', 'https://example.test', 'https://example.test/jobs', 'fixture', 1
+            );
+
+            CREATE TABLE jobs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                institution_id INTEGER NOT NULL REFERENCES institutions(id),
+                institution_name TEXT NOT NULL,
+                institution_type TEXT NOT NULL,
+                region TEXT NOT NULL,
+                title TEXT NOT NULL,
+                department TEXT,
+                location TEXT,
+                education TEXT,
+                profession TEXT,
+                job_category TEXT NOT NULL,
+                responsibilities TEXT,
+                requirements TEXT,
+                posted_at TEXT,
+                deadline TEXT,
+                source_url TEXT NOT NULL UNIQUE,
+                source_text_hash TEXT NOT NULL,
+                raw_text TEXT NOT NULL,
+                tags TEXT NOT NULL,
+                extraction_evidence TEXT NOT NULL,
+                fetched_at TEXT NOT NULL,
+                parser_name TEXT NOT NULL,
+                confidence REAL NOT NULL
+            );
+
+            INSERT INTO jobs (
+                id, institution_id, institution_name, institution_type, region, title, job_category,
+                source_url, source_text_hash, raw_text, tags, extraction_evidence, fetched_at, parser_name, confidence
+            ) VALUES (
+                99, 1, '旧机构', '医院', '上海', '旧岗位', '科研',
+                'fixture://legacy-job', 'legacy-hash', '旧岗位原文', '[]', '{}', '2026-06-18T00:00:00+00:00', 'legacy-parser', 0.9
+            );
+
+            CREATE TABLE resume_drafts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                job_id INTEGER NOT NULL,
+                profile_id TEXT NOT NULL,
+                title TEXT NOT NULL,
+                sections TEXT NOT NULL,
+                evidence TEXT NOT NULL,
+                gaps TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            INSERT INTO resume_drafts (id, job_id, profile_id, title, sections, evidence, gaps, created_at, updated_at)
+            VALUES (1, 99, '1', '旧草稿', '[]', '[]', '[]', '2026-06-18T00:00:00+00:00', '2026-06-18T00:00:00+00:00');
+            """
+        )
+        conn.commit()
+
+    init_db(engine)
+
+    assert get_profile(engine, 1)["skills"][0]["name"] == "临床研究"
+    assert get_resume_draft(engine, 1, 1)["title"] == "旧草稿"
+    with connect(engine) as conn:
+        profile_columns = {row["name"] for row in conn.execute("PRAGMA table_info(profiles)").fetchall()}
+        draft_columns = {row["name"] for row in conn.execute("PRAGMA table_info(resume_drafts)").fetchall()}
+    assert "user_id" in profile_columns
+    assert "user_id" in draft_columns
+    assert "profile_id" not in draft_columns
+
+
+def test_init_db_preserves_unmatched_legacy_profile_and_draft_rows(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'orphan-legacy.db'}")
+    with connect(engine) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL UNIQUE,
+                password_hash TEXT NOT NULL,
+                password_salt TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+
+            CREATE TABLE profiles (
+                id INTEGER PRIMARY KEY,
+                data TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            INSERT INTO profiles (id, data, updated_at)
+            VALUES (42, '{"skills":[{"id":"skill-orphan","name":"孤儿旧履历"}]}', '2026-06-18T00:00:00+00:00');
+
+            CREATE TABLE resume_drafts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                job_id INTEGER NOT NULL,
+                profile_id TEXT NOT NULL,
+                title TEXT NOT NULL,
+                sections TEXT NOT NULL,
+                evidence TEXT NOT NULL,
+                gaps TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            INSERT INTO resume_drafts (id, job_id, profile_id, title, sections, evidence, gaps, created_at, updated_at)
+            VALUES (7, 999, '42', '孤儿旧草稿', '[]', '[]', '[]', '2026-06-18T00:00:00+00:00', '2026-06-18T00:00:00+00:00');
+            """
+        )
+        conn.commit()
+
+    init_db(engine)
+
+    with connect(engine) as conn:
+        orphan_profile = conn.execute("SELECT data FROM profiles_legacy WHERE id = 42").fetchone()
+        orphan_draft = conn.execute("SELECT title FROM resume_drafts_legacy WHERE id = 7").fetchone()
+        migrated_profiles = conn.execute("SELECT COUNT(*) AS count FROM profiles").fetchone()["count"]
+        migrated_drafts = conn.execute("SELECT COUNT(*) AS count FROM resume_drafts").fetchone()["count"]
+
+    assert orphan_profile is not None
+    assert "孤儿旧履历" in orphan_profile["data"]
+    assert orphan_draft["title"] == "孤儿旧草稿"
+    assert migrated_profiles == 0
+    assert migrated_drafts == 0
 
 
 def test_health_and_seed_institutions(tmp_path):
@@ -399,6 +570,8 @@ def test_profile_resume_draft_truth_constraints_and_exports(tmp_path):
     assert draft_payload["sections"]
     assert draft_payload["evidence"]
     assert all(item["profile_field_id"] for item in draft_payload["evidence"])
+    assert all(item["source_label"] for item in draft_payload["evidence"])
+    assert all(item["evidence_strength"] in {"strong", "partial", "weak"} for item in draft_payload["evidence"])
     assert all("未在你的履历中找到对应证据" in gap["message"] for gap in draft_payload["gaps"])
 
     docx = client.post(f"/api/resume-drafts/{draft_payload['id']}/export", params={"format": "docx"}, headers=auth)
@@ -412,6 +585,122 @@ def test_profile_resume_draft_truth_constraints_and_exports(tmp_path):
     assert pdf.status_code == 200
     assert pdf.headers["content-type"].startswith("application/pdf")
     assert pdf.content.startswith(b"%PDF")
+
+
+def test_user_job_status_is_private_and_visible_on_job_payloads(tmp_path):
+    client = make_client(tmp_path)
+    first_auth = auth_headers(client, username="first-user")
+    second_auth = auth_headers(client, username="second-user")
+    crawl_and_wait(client, [1])
+    job = client.get("/api/jobs").json()["items"][0]
+
+    created = client.put(
+        f"/api/jobs/{job['id']}/status",
+        json={"status": "preparing", "note": "重点准备科研证据", "deadline": "2026-07-01"},
+        headers=first_auth,
+    )
+
+    assert created.status_code == 200
+    assert created.json()["status"] == "preparing"
+    assert created.json()["note"] == "重点准备科研证据"
+
+    first_list = client.get("/api/jobs", headers=first_auth).json()["items"]
+    first_item = next(item for item in first_list if item["id"] == job["id"])
+    assert first_item["user_status"]["status"] == "preparing"
+    assert first_item["user_status"]["deadline"] == "2026-07-01"
+
+    second_detail = client.get(f"/api/jobs/{job['id']}", headers=second_auth).json()
+    assert second_detail["user_status"] is None
+
+    cleared = client.delete(f"/api/jobs/{job['id']}/status", headers=first_auth)
+    assert cleared.status_code == 204
+    assert client.get(f"/api/jobs/{job['id']}", headers=first_auth).json()["user_status"] is None
+
+
+def test_job_payloads_reject_invalid_optional_auth_tokens(tmp_path):
+    client = make_client(tmp_path)
+    crawl_and_wait(client, [1])
+    job = client.get("/api/jobs").json()["items"][0]
+    invalid_auth = {"Authorization": "Bearer invalid-token"}
+
+    assert client.get("/api/jobs").json()["items"][0]["user_status"] is None
+    assert client.get(f"/api/jobs/{job['id']}").json()["user_status"] is None
+    assert client.get("/api/jobs", headers=invalid_auth).status_code == 401
+    assert client.get(f"/api/jobs/{job['id']}", headers=invalid_auth).status_code == 401
+
+
+def test_deleting_status_for_missing_job_returns_404(tmp_path):
+    client = make_client(tmp_path)
+    auth = auth_headers(client)
+
+    missing = client.delete("/api/jobs/999999/status", headers=auth)
+
+    assert missing.status_code == 404
+    assert missing.json()["detail"] == "岗位不存在"
+
+
+def test_resume_export_modes_keep_application_copy_free_of_gap_diagnostics(tmp_path):
+    client = make_client(tmp_path)
+    auth = auth_headers(client)
+    crawl_and_wait(client, [1])
+    job = client.get("/api/jobs", params={"keyword": "科研"}).json()["items"][0]
+    profile_payload = {
+        "education": [],
+        "experiences": [],
+        "projects": [],
+        "publications": [],
+        "certificates": [],
+        "skills": [{"id": "skill-1", "name": "绘画"}],
+        "teaching": [],
+        "awards": [],
+        "languages": [],
+    }
+    client.put("/api/profile", json=profile_payload, headers=auth)
+    draft = client.post("/api/resume-drafts", json={"job_id": job["id"]}, headers=auth).json()
+    assert any(section["id"] == "gaps" for section in draft["sections"])
+
+    application = client.post(
+        f"/api/resume-drafts/{draft['id']}/export",
+        params={"format": "docx", "mode": "application"},
+        headers=auth,
+    )
+    diagnostic = client.post(
+        f"/api/resume-drafts/{draft['id']}/export",
+        params={"format": "docx", "mode": "diagnostic"},
+        headers=auth,
+    )
+    application_pdf = client.post(
+        f"/api/resume-drafts/{draft['id']}/export",
+        params={"format": "pdf", "mode": "application"},
+        headers=auth,
+    )
+
+    assert application.status_code == 200
+    assert diagnostic.status_code == 200
+    assert application_pdf.status_code == 200
+    application_xml = docx_document_xml(application.content)
+    diagnostic_xml = docx_document_xml(diagnostic.content)
+    assert "投递前需补充确认" not in application_xml
+    assert "未在你的履历中找到对应证据" not in application_xml
+    assert "投递前需补充确认" in diagnostic_xml
+    assert "未在你的履历中找到对应证据" in diagnostic_xml
+    assert b"\xe6\x8a\x95\xe9\x80\x92\xe5\x89\x8d\xe9\x9c\x80\xe8\xa1\xa5\xe5\x85\x85\xe7\xa1\xae\xe8\xae\xa4" not in application_pdf.content
+    assert b"\xe6\x9c\xaa\xe5\x9c\xa8\xe4\xbd\xa0\xe7\x9a\x84\xe5\xb1\xa5\xe5\x8e\x86\xe4\xb8\xad\xe6\x89\xbe\xe5\x88\xb0\xe5\xaf\xb9\xe5\xba\x94\xe8\xaf\x81\xe6\x8d\xae" not in application_pdf.content
+
+
+def test_job_status_deadline_must_be_iso_date(tmp_path):
+    client = make_client(tmp_path)
+    auth = auth_headers(client)
+    crawl_and_wait(client, [1])
+    job = client.get("/api/jobs").json()["items"][0]
+
+    invalid = client.put(
+        f"/api/jobs/{job['id']}/status",
+        json={"status": "preparing", "deadline": "明天"},
+        headers=auth,
+    )
+
+    assert invalid.status_code == 422
 
 
 def test_report_generation_contains_scope_and_sources(tmp_path):

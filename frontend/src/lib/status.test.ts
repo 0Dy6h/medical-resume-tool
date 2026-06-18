@@ -20,4 +20,11 @@ describe("status helpers", () => {
     expect(statusLabel("stable")).toBe("稳定");
     expect(statusTone("stable")).toBe("success");
   });
+
+  it("labels user job workflow states", () => {
+    expect(statusLabel("preparing")).toBe("准备中");
+    expect(statusTone("preparing")).toBe("working");
+    expect(statusLabel("applied")).toBe("已投递");
+    expect(statusTone("applied")).toBe("success");
+  });
 });

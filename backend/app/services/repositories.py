@@ -205,6 +205,7 @@ def mark_institution(engine: DatabaseEngine, institution_id: int, status: str, e
 def _inflate_job(item: dict[str, Any]) -> dict[str, Any]:
     item["tags"] = from_json(item.get("tags"), [])
     item["extraction_evidence"] = from_json(item.get("extraction_evidence"), {})
+    item.setdefault("user_status", None)
     return item
 
 
@@ -237,7 +238,40 @@ def build_jobs_where_clause(filters: dict[str, Any]) -> tuple[str, list[Any]]:
     return where, params
 
 
-def list_jobs(engine: DatabaseEngine, filters: dict[str, Any]) -> dict[str, Any]:
+def _job_status_payload(row: Any | None) -> dict[str, Any] | None:
+    if row is None:
+        return None
+    item = dict(row)
+    return {
+        "job_id": item["job_id"],
+        "status": item["status"],
+        "note": item["note"],
+        "deadline": item["deadline"],
+        "created_at": item["created_at"],
+        "updated_at": item["updated_at"],
+    }
+
+
+def _attach_job_statuses(engine: DatabaseEngine, jobs: list[dict[str, Any]], user_id: int | None) -> list[dict[str, Any]]:
+    if user_id is None or not jobs:
+        return jobs
+    job_ids = [item["id"] for item in jobs]
+    placeholders = ",".join("?" for _ in job_ids)
+    with connect(engine) as conn:
+        rows = conn.execute(
+            f"""
+            SELECT * FROM job_statuses
+            WHERE user_id = ? AND job_id IN ({placeholders})
+            """,
+            [user_id, *job_ids],
+        ).fetchall()
+    by_job_id = {row["job_id"]: _job_status_payload(row) for row in rows}
+    for item in jobs:
+        item["user_status"] = by_job_id.get(item["id"])
+    return jobs
+
+
+def list_jobs(engine: DatabaseEngine, filters: dict[str, Any], user_id: int | None = None) -> dict[str, Any]:
     where, params = build_jobs_where_clause(filters)
     limit = filters.get("limit", 100)
     offset = filters.get("offset", 0)
@@ -247,20 +281,74 @@ def list_jobs(engine: DatabaseEngine, filters: dict[str, Any]) -> dict[str, Any]
             f"SELECT * FROM jobs {where} ORDER BY fetched_at DESC, id DESC LIMIT ? OFFSET ?",
             params + [limit, offset]
         ).fetchall()
+    items = [_inflate_job(dict(row)) for row in rows]
     return {
         "total": total,
-        "items": [_inflate_job(dict(row)) for row in rows],
+        "items": _attach_job_statuses(engine, items, user_id),
         "limit": limit,
         "offset": offset,
     }
 
 
-def get_job(engine: DatabaseEngine, job_id: int) -> dict[str, Any]:
+def get_job(engine: DatabaseEngine, job_id: int, user_id: int | None = None) -> dict[str, Any]:
     with connect(engine) as conn:
         row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
     if row is None:
         raise KeyError(job_id)
-    return _inflate_job(dict(row))
+    job = _inflate_job(dict(row))
+    return _attach_job_statuses(engine, [job], user_id)[0]
+
+
+def upsert_job_status(
+    engine: DatabaseEngine,
+    user_id: int,
+    job_id: int,
+    *,
+    status: str,
+    note: str | None = None,
+    deadline: str | None = None,
+) -> dict[str, Any]:
+    timestamp = now_iso()
+    with connect(engine) as conn:
+        job = conn.execute("SELECT id FROM jobs WHERE id = ?", (job_id,)).fetchone()
+        if job is None:
+            raise KeyError(job_id)
+        existing = conn.execute(
+            "SELECT created_at FROM job_statuses WHERE user_id = ? AND job_id = ?",
+            (user_id, job_id),
+        ).fetchone()
+        created_at = existing["created_at"] if existing else timestamp
+        conn.execute(
+            """
+            INSERT INTO job_statuses (user_id, job_id, status, note, deadline, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(user_id, job_id) DO UPDATE SET
+                status=excluded.status,
+                note=excluded.note,
+                deadline=excluded.deadline,
+                updated_at=excluded.updated_at
+            """,
+            (user_id, job_id, status, note, deadline, created_at, timestamp),
+        )
+        conn.commit()
+    status_row = get_job_status(engine, user_id, job_id)
+    assert status_row is not None
+    return status_row
+
+
+def get_job_status(engine: DatabaseEngine, user_id: int, job_id: int) -> dict[str, Any] | None:
+    with connect(engine) as conn:
+        row = conn.execute(
+            "SELECT * FROM job_statuses WHERE user_id = ? AND job_id = ?",
+            (user_id, job_id),
+        ).fetchone()
+    return _job_status_payload(row)
+
+
+def delete_job_status(engine: DatabaseEngine, user_id: int, job_id: int) -> None:
+    with connect(engine) as conn:
+        conn.execute("DELETE FROM job_statuses WHERE user_id = ? AND job_id = ?", (user_id, job_id))
+        conn.commit()
 
 
 def create_user(engine: DatabaseEngine, username: str, password_hash: str, password_salt: str) -> dict[str, Any]:

@@ -274,6 +274,122 @@ button:disabled {
   margin-bottom: 12px;
 }
 
+.launch-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.launch-copy {
+  display: grid;
+  gap: 6px;
+}
+
+.onboarding-paths {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.onboarding-path {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 96px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-strong);
+  padding: 12px;
+  text-align: left;
+  color: var(--ink);
+}
+
+.onboarding-path:hover {
+  border-color: rgba(22, 119, 90, 0.36);
+  background: #f5fbf8;
+}
+
+.path-icon,
+.workflow-icon {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  background: var(--green-soft);
+  color: var(--green);
+}
+
+.onboarding-path strong,
+.onboarding-path em,
+.onboarding-path b {
+  display: block;
+}
+
+.onboarding-path em {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 13px;
+  font-style: normal;
+  line-height: 1.45;
+}
+
+.onboarding-path b {
+  color: var(--blue);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.workflow-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.workflow-card {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) 22px;
+  grid-template-rows: auto auto;
+  align-items: center;
+  gap: 8px 10px;
+  min-height: 116px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f7faf8;
+  padding: 12px;
+  text-align: left;
+  color: var(--ink);
+}
+
+.workflow-card.done {
+  border-color: rgba(22, 119, 90, 0.28);
+  background: #f1faf6;
+}
+
+.workflow-card > div:nth-child(2) {
+  min-width: 0;
+}
+
+.workflow-card span,
+.workflow-card p,
+.workflow-card em {
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
+  line-height: 1.45;
+}
+
+.workflow-card strong {
+  display: block;
+  margin: 3px 0;
+}
+
+.workflow-card em {
+  grid-column: 2 / 4;
+  color: var(--blue);
+  font-weight: 700;
+}
+
 .metric-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -439,9 +555,14 @@ tbody tr:hover,
 
 .filter-row {
   display: grid;
-  grid-template-columns: minmax(280px, 1fr) 160px 98px;
+  grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
   gap: 8px;
   margin-bottom: 12px;
+}
+
+.filter-row .search-box {
+  grid-column: span 2;
+  min-width: 0;
 }
 
 .search-box {
@@ -517,6 +638,33 @@ textarea {
 
 .fact-grid span {
   color: var(--muted);
+}
+
+.job-action-panel {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f7faf8;
+  padding: 12px;
+}
+
+.compact-head {
+  margin-bottom: 0;
+}
+
+.status-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
+}
+
+.status-form label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 13px;
 }
 
 .tag-row {
@@ -785,6 +933,27 @@ pre {
   line-height: 1.55;
 }
 
+.evidence-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.evidence-card-head strong {
+  min-width: 0;
+  line-height: 1.45;
+}
+
+.evidence-card-head .status {
+  flex: 0 0 auto;
+  margin: 0;
+}
+
+.evidence-terms {
+  margin-top: 8px;
+}
+
 .gap-card {
   border-color: #edcac6;
   background: #fff8f7;
@@ -918,7 +1087,9 @@ pre {
   .split-page,
   .resume-layout,
   .analysis-grid,
-  .metric-grid {
+  .metric-grid,
+  .onboarding-paths,
+  .workflow-grid {
     grid-template-columns: 1fr;
   }
 

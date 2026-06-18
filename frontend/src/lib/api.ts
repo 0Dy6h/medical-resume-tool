@@ -8,7 +8,8 @@ import type {
   ProfileImportResult,
   Report,
   ResumeDraft,
-  ResumeSection
+  ResumeSection,
+  JobUserStatus
 } from "../types";
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "";
@@ -102,6 +103,23 @@ export const api = {
     return request<JobList>(`/api/jobs${query.toString() ? `?${query}` : ""}`);
   },
   job: (id: number) => request<JobDetail>(`/api/jobs/${id}`),
+  saveJobStatus: (jobId: number, payload: { status: string; note?: string | null; deadline?: string | null }) =>
+    request<JobUserStatus>(`/api/jobs/${jobId}/status`, {
+      method: "PUT",
+      body: JSON.stringify(payload)
+    }),
+  clearJobStatus: async (jobId: number) => {
+    const response = await fetch(`${API_BASE}/api/jobs/${jobId}/status`, {
+      method: "DELETE",
+      headers: authHeaders()
+    });
+    if (response.status === 401) {
+      setToken(null);
+      onUnauthorized?.();
+      throw new UnauthorizedError();
+    }
+    if (!response.ok) throw new Error(await errorMessage(response, "清除状态失败"));
+  },
   crawlRun: (id: number) => request<CrawlRun>(`/api/crawl-runs/${id}`),
   analytics: () => request<AnalyticsSummary>("/api/analytics/summary"),
   profile: () => request<Profile>("/api/profile"),
@@ -141,8 +159,8 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ title, filters: {} })
     }),
-  exportResume: async (draftId: number, format: "docx" | "pdf") => {
-    const response = await fetch(`${API_BASE}/api/resume-drafts/${draftId}/export?format=${format}`, {
+  exportResume: async (draftId: number, format: "docx" | "pdf", mode: "application" | "diagnostic" = "application") => {
+    const response = await fetch(`${API_BASE}/api/resume-drafts/${draftId}/export?format=${format}&mode=${mode}`, {
       method: "POST",
       headers: authHeaders()
     });

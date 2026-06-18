@@ -19,6 +19,19 @@ PROFILE_COLLECTIONS = [
 ]
 
 
+COLLECTION_TITLES = {
+    "education": "教育经历",
+    "experiences": "工作/实习经历",
+    "projects": "科研/项目经历",
+    "publications": "发表论文",
+    "certificates": "证书资质",
+    "skills": "技能能力",
+    "teaching": "教学经历",
+    "awards": "获奖荣誉",
+    "languages": "语言能力",
+}
+
+
 def flatten_profile_facts(profile: dict[str, Any]) -> list[dict[str, Any]]:
     facts = []
     for collection in PROFILE_COLLECTIONS:
@@ -32,8 +45,25 @@ def flatten_profile_facts(profile: dict[str, Any]) -> list[dict[str, Any]]:
                     text_parts.extend(str(v) for v in value.values())
                 elif value is not None:
                     text_parts.append(str(value))
-            facts.append({"profile_field_id": field_id, "collection": collection, "text": normalize_text(" ".join(text_parts)), "raw": item})
+            facts.append(
+                {
+                    "profile_field_id": field_id,
+                    "collection": collection,
+                    "text": normalize_text(" ".join(text_parts)),
+                    "raw": item,
+                    "source_label": _source_label(collection, item, index),
+                }
+            )
     return facts
+
+
+def _source_label(collection: str, item: dict[str, Any], index: int) -> str:
+    title = COLLECTION_TITLES.get(collection, collection)
+    for key in ["organization", "school", "name", "title", "course", "role"]:
+        value = item.get(key)
+        if value:
+            return f"{title}：{value}"
+    return f"{title} #{index + 1}"
 
 
 def _tokens(text: str) -> set[str]:
@@ -74,12 +104,22 @@ def match_profile_to_job(profile: dict[str, Any], job: dict[str, Any]) -> tuple[
                         "collection": fact["collection"],
                         "matched_terms": overlap,
                         "source_text": fact["text"],
+                        "source_label": fact["source_label"],
+                        "evidence_strength": _evidence_strength(len(overlap), len(req_tokens)),
                     }
                 )
                 used_pairs.add(pair)
         else:
             gaps.append({"requirement": requirement, "message": f"未在你的履历中找到对应证据：{requirement}"})
     return evidence, gaps
+
+
+def _evidence_strength(overlap_count: int, requirement_token_count: int) -> str:
+    if overlap_count >= 3 or (requirement_token_count and overlap_count / requirement_token_count >= 0.5):
+        return "strong"
+    if overlap_count >= 2:
+        return "partial"
+    return "weak"
 
 
 def build_resume_sections(profile: dict[str, Any], job: dict[str, Any], evidence: list[dict[str, Any]], gaps: list[dict[str, Any]]) -> list[dict[str, Any]]:

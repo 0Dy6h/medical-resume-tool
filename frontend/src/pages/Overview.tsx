@@ -1,9 +1,10 @@
-import { Activity, BriefcaseBusiness, Building2, MapPinned, RefreshCcw } from "lucide-react";
+import { Activity, ArrowRight, BriefcaseBusiness, Building2, CheckCircle2, DatabaseZap, FileText, MapPinned, RefreshCcw, ShieldCheck, UserRound } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useToast } from "../components/Toast";
 import { api } from "../lib/api";
 import { formatDate } from "../lib/format";
-import type { AnalyticsSummary, Job } from "../types";
+import { onboardingPaths, workflowSteps } from "../lib/workflow";
+import type { AnalyticsSummary, Job, Profile } from "../types";
 
 type OverviewProps = {
   onNavigate: (page: string) => void;
@@ -13,14 +14,16 @@ export function Overview({ onNavigate }: OverviewProps) {
   const toast = useToast();
   const [summary, setSummary] = useState<AnalyticsSummary | null>(null);
   const [jobs, setJobs] = useState<Job[]>([]);
+  const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(false);
 
   async function refresh() {
     setLoading(true);
     try {
-      const [summaryPayload, jobsPayload] = await Promise.all([api.analytics(), api.jobs()]);
+      const [summaryPayload, jobsPayload, profilePayload] = await Promise.all([api.analytics(), api.jobs(), api.profile()]);
       setSummary(summaryPayload);
       setJobs(jobsPayload.items.slice(0, 6));
+      setProfile(profilePayload);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "加载总览数据失败");
     } finally {
@@ -31,6 +34,10 @@ export function Overview({ onNavigate }: OverviewProps) {
   useEffect(() => {
     void refresh();
   }, []);
+
+  const steps = workflowSteps(summary, profile);
+  const paths = onboardingPaths(summary, profile);
+  const readyForResume = steps.every((step) => step.done);
 
   return (
     <div className="page-stack">
@@ -67,6 +74,46 @@ export function Overview({ onNavigate }: OverviewProps) {
         </button>
       </div>
 
+      <section className="panel launch-panel">
+        <div className="launch-copy">
+          <span className="eyebrow">下一步</span>
+          <h2>{readyForResume ? "证据链已就绪，可以生成投递版简历" : "先跑通岗位样本和履历事实，再生成草稿"}</h2>
+          <p className="subtle">目标是形成一条可复查链路：官网岗位要求、你的真实履历证据、可导出的投递版简历。</p>
+        </div>
+        <div className="onboarding-paths">
+          {paths.map((path) => (
+            <button className="onboarding-path" key={path.id} onClick={() => onNavigate(path.target)}>
+              <span className="path-icon">
+                {path.id === "demo" ? <DatabaseZap size={18} /> : <ShieldCheck size={18} />}
+              </span>
+              <span>
+                <strong>{path.title}</strong>
+                <em>{path.detail}</em>
+              </span>
+              <b>{path.action}</b>
+            </button>
+          ))}
+        </div>
+        <div className="workflow-grid">
+          {steps.map((step, index) => (
+            <button className={step.done ? "workflow-card done" : "workflow-card"} key={step.id} onClick={() => onNavigate(step.target)}>
+              <div className="workflow-icon">
+                {step.id === "jobs" && <DatabaseZap size={18} />}
+                {step.id === "profile" && <UserRound size={18} />}
+                {step.id === "resume" && <FileText size={18} />}
+              </div>
+              <div>
+                <span>0{index + 1}</span>
+                <strong>{step.title}</strong>
+                <p>{step.detail}</p>
+              </div>
+              {step.done ? <CheckCircle2 size={18} /> : <ArrowRight size={18} />}
+              <em>{step.action}</em>
+            </button>
+          ))}
+        </div>
+      </section>
+
       <section className="panel">
         <div className="panel-head">
           <h2>近期岗位</h2>
@@ -94,4 +141,3 @@ export function Overview({ onNavigate }: OverviewProps) {
     </div>
   );
 }
-

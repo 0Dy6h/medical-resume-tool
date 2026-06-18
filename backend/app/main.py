@@ -12,10 +12,13 @@ from app.schemas import (
     AuthOut,
     CrawlRunCreate,
     CrawlRunOut,
+    ExportMode,
     ExportFormat,
     InstitutionOut,
     JobDetailOut,
     JobListOut,
+    JobStatusOut,
+    JobStatusPayload,
     LoginPayload,
     ProfileImportOut,
     ProfilePayload,
@@ -35,6 +38,7 @@ from app.services.profile_import import ProfileImportError, build_profile_contra
 from app.services.repositories import (
     create_crawl_run,
     create_user,
+    delete_job_status,
     get_crawl_run,
     get_institutions_by_ids,
     get_job,
@@ -46,6 +50,7 @@ from app.services.repositories import (
     list_jobs,
     save_profile,
     update_resume_draft_sections,
+    upsert_job_status,
     create_resume_draft as persist_resume_draft,
 )
 from app.services.resume import PROFILE_COLLECTIONS, generate_resume_draft
@@ -120,6 +125,7 @@ def create_app(database_url: str | None = None) -> FastAPI:
     @app.get("/api/jobs", response_model=JobListOut)
     def jobs(
         engine: Annotated[DatabaseEngine, Depends(get_engine)],
+        user: Annotated[dict | None, Depends(get_optional_user)] = None,
         keyword: str | None = None,
         institution_id: int | None = None,
         region: str | None = None,
@@ -143,12 +149,17 @@ def create_app(database_url: str | None = None) -> FastAPI:
                 "limit": limit,
                 "offset": offset,
             },
+            user_id=user["id"] if user else None,
         )
 
     @app.get("/api/jobs/{job_id}", response_model=JobDetailOut)
-    def job_detail(job_id: int, engine: Annotated[DatabaseEngine, Depends(get_engine)]) -> dict:
+    def job_detail(
+        job_id: int,
+        engine: Annotated[DatabaseEngine, Depends(get_engine)],
+        user: Annotated[dict | None, Depends(get_optional_user)] = None,
+    ) -> dict:
         try:
-            job = get_job(engine, job_id)
+            job = get_job(engine, job_id, user_id=user["id"] if user else None)
         except KeyError:
             raise HTTPException(status_code=404, detail="岗位不存在") from None
         return {
@@ -160,6 +171,38 @@ def create_app(database_url: str | None = None) -> FastAPI:
                 "raw_text": job["raw_text"],
             },
         }
+
+    @app.put("/api/jobs/{job_id}/status", response_model=JobStatusOut)
+    def put_job_status(
+        job_id: int,
+        payload: JobStatusPayload,
+        engine: Annotated[DatabaseEngine, Depends(get_engine)],
+        user: Annotated[dict, Depends(get_current_user)],
+    ) -> dict:
+        try:
+            return upsert_job_status(
+                engine,
+                user["id"],
+                job_id,
+                status=payload.status,
+                note=payload.note,
+                deadline=payload.deadline.isoformat() if payload.deadline else None,
+            )
+        except KeyError:
+            raise HTTPException(status_code=404, detail="岗位不存在") from None
+
+    @app.delete("/api/jobs/{job_id}/status", status_code=204)
+    def clear_job_status(
+        job_id: int,
+        engine: Annotated[DatabaseEngine, Depends(get_engine)],
+        user: Annotated[dict, Depends(get_current_user)],
+    ) -> Response:
+        try:
+            get_job(engine, job_id)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="岗位不存在") from None
+        delete_job_status(engine, user["id"], job_id)
+        return Response(status_code=204)
 
     @app.get("/api/analytics/summary", response_model=AnalyticsSummary)
     def summary(
@@ -262,19 +305,21 @@ def create_app(database_url: str | None = None) -> FastAPI:
         engine: Annotated[DatabaseEngine, Depends(get_engine)],
         user: Annotated[dict, Depends(get_current_user)],
         format: Annotated[ExportFormat, Query()] = "docx",
+        mode: Annotated[ExportMode, Query()] = "application",
     ) -> Response:
         try:
             draft = get_resume_draft(engine, user["id"], draft_id)
         except KeyError:
             raise HTTPException(status_code=404, detail="简历草稿不存在") from None
+        export_draft = _draft_for_export(draft, mode)
         if format == "docx":
             return Response(
-                content=export_docx(draft),
+                content=export_docx(export_draft),
                 media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                 headers={"Content-Disposition": f'attachment; filename="resume-{draft_id}.docx"'},
             )
         return Response(
-            content=export_pdf(draft),
+            content=export_pdf(export_draft),
             media_type="application/pdf",
             headers={"Content-Disposition": f'attachment; filename="resume-{draft_id}.pdf"'},
         )
@@ -300,6 +345,39 @@ def get_current_user(
     if user is None:
         raise HTTPException(status_code=401, detail="账号不存在或已失效")
     return user
+
+
+def get_optional_user(
+    engine: Annotated[DatabaseEngine, Depends(get_engine)],
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict | None:
+    if not authorization:
+        return None
+    token = None
+    if authorization.lower().startswith("bearer "):
+        token = authorization[7:].strip()
+    if not token:
+        raise HTTPException(status_code=401, detail="请先登录")
+    payload = verify_token(token)
+    if payload is None:
+        raise HTTPException(status_code=401, detail="请先登录")
+    user = get_user_by_id(engine, int(payload["uid"]))
+    if user is None:
+        raise HTTPException(status_code=401, detail="账号不存在或已失效")
+    return user
+
+
+def _draft_for_export(draft: dict, mode: ExportMode) -> dict:
+    if mode == "diagnostic":
+        return draft
+    return {
+        **draft,
+        "sections": [
+            section
+            for section in draft.get("sections", [])
+            if section.get("id") != "gaps" and section.get("title") != "投递前需补充确认"
+        ],
+    }
 
 
 app = create_app()

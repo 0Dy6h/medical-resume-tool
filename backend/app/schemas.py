@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -79,6 +80,7 @@ class JobOut(BaseModel):
     fetched_at: str
     parser_name: str
     confidence: float
+    user_status: dict[str, Any] | None = None
 
 
 class JobListOut(BaseModel):
@@ -160,6 +162,21 @@ class ResumeDraftUpdate(BaseModel):
     sections: list[dict[str, Any]]
 
 
+class JobStatusPayload(BaseModel):
+    status: Literal["saved", "evaluating", "preparing", "applied", "archived"] = "saved"
+    note: str | None = Field(default=None, max_length=1000)
+    deadline: date | None = None
+
+
+class JobStatusOut(BaseModel):
+    job_id: int
+    status: str
+    note: str | None = None
+    deadline: str | None = None
+    created_at: str
+    updated_at: str
+
+
 class ResumeDraftOut(BaseModel):
     id: int
     job_id: int
@@ -187,3 +204,4 @@ class ReportOut(BaseModel):
 
 
 ExportFormat = Literal["docx", "pdf"]
+ExportMode = Literal["application", "diagnostic"]
