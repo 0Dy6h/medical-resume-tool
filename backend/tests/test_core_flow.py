@@ -587,6 +587,55 @@ def test_profile_resume_draft_truth_constraints_and_exports(tmp_path):
     assert pdf.content.startswith(b"%PDF")
 
 
+def test_resume_export_includes_identity_header_and_basics_persist(tmp_path):
+    client = make_client(tmp_path)
+    auth = auth_headers(client)
+    crawl_and_wait(client, [1])
+    job = client.get("/api/jobs", params={"keyword": "科研"}).json()["items"][0]
+
+    profile_payload = {
+        "basics": {
+            "name": "林晓",
+            "phone": "13800000000",
+            "email": "lin@example.com",
+            "intended_position": "科研助理",
+        },
+        "education": [{"id": "edu-1", "school": "复旦大学", "degree": "硕士", "major": "临床医学"}],
+        "experiences": [],
+        "projects": [],
+        "publications": [],
+        "certificates": [],
+        "skills": [{"id": "skill-1", "name": "SPSS"}],
+        "teaching": [],
+        "awards": [],
+        "languages": [],
+    }
+    saved = client.put("/api/profile", json=profile_payload, headers=auth)
+    assert saved.status_code == 200
+
+    fetched = client.get("/api/profile", headers=auth).json()
+    assert fetched["basics"]["name"] == "林晓"
+
+    draft = client.post("/api/resume-drafts", json={"job_id": job["id"]}, headers=auth).json()
+    assert draft["sections"][0]["id"] == "identity"
+    assert draft["sections"][0]["items"][0]["text"] == "林晓"
+
+    docx = client.post(
+        f"/api/resume-drafts/{draft['id']}/export", params={"format": "docx"}, headers=auth
+    )
+    assert docx.status_code == 200
+    assert docx.headers["content-type"].startswith(
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
+    assert "林晓" in docx_document_xml(docx.content)
+
+    pdf = client.post(
+        f"/api/resume-drafts/{draft['id']}/export", params={"format": "pdf"}, headers=auth
+    )
+    assert pdf.status_code == 200
+    assert pdf.content.startswith(b"%PDF")
+
+
 def test_user_job_status_is_private_and_visible_on_job_payloads(tmp_path):
     client = make_client(tmp_path)
     first_auth = auth_headers(client, username="first-user")

@@ -107,6 +107,7 @@ class AnalyticsSummary(BaseModel):
 
 
 class ProfilePayload(BaseModel):
+    basics: dict[str, Any] = Field(default_factory=dict)
     education: list[dict[str, Any]] = Field(default_factory=list)
     experiences: list[dict[str, Any]] = Field(default_factory=list)
     projects: list[dict[str, Any]] = Field(default_factory=list)

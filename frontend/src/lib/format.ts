@@ -9,3 +9,7 @@ export function maxCount(items: Array<{ count: number }>) {
   return Math.max(1, ...items.map((item) => item.count));
 }
 
+export function isDemoStrategy(strategy?: string | null) {
+  return strategy === "fixture";
+}
+

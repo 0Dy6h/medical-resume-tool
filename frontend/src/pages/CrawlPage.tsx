@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { StatusPill } from "../components/StatusPill";
 import { useToast } from "../components/Toast";
 import { api } from "../lib/api";
-import { formatDate } from "../lib/format";
+import { formatDate, isDemoStrategy } from "../lib/format";
 import type { CrawlRun, Institution } from "../types";
 
 const TERMINAL_STATUSES = new Set(["completed", "partial", "failed"]);
@@ -102,7 +102,7 @@ export function CrawlPage() {
       <div className="toolbar">
         <div>
           <h1>抓取任务</h1>
-          <p className="subtle">机构种子、公开页面、抓取状态</p>
+          <p className="subtle">机构种子、公开页面、抓取状态（策略为 fixture 的是内置演示数据，非真实抓取）</p>
         </div>
         <div className="button-row">
           <button className="icon-text-button" onClick={refresh} disabled={crawling}>
@@ -185,7 +185,12 @@ export function CrawlPage() {
                 </td>
                 <td>{item.institution_type}</td>
                 <td>{item.region}</td>
-                <td>{item.crawl_strategy}</td>
+                <td>
+                  <div className="status-cell">
+                    <span>{item.crawl_strategy}</span>
+                    {isDemoStrategy(item.crawl_strategy) && <span className="tag">演示数据</span>}
+                  </div>
+                </td>
                 <td>
                   <div className="status-cell">
                     <StatusPill value={item.last_status} />

@@ -111,6 +111,15 @@ const configs: CollectionConfig[] = [
 
 const configByKey = new Map(configs.map((config) => [config.key, config] as const));
 
+const BASIC_FIELDS: Field[] = [
+  { key: "name", label: "姓名" },
+  { key: "phone", label: "电话" },
+  { key: "email", label: "邮箱" },
+  { key: "intended_position", label: "求职意向" },
+  { key: "location", label: "所在地" },
+  { key: "summary", label: "个人简介", area: true }
+];
+
 function newId(prefix: string) {
   return `${prefix}-${Math.random().toString(16).slice(2, 8)}`;
 }
@@ -255,6 +264,10 @@ export function ProfilePage() {
     });
   }
 
+  function updateBasics(key: string, value: string) {
+    setProfile((current) => ({ ...current, basics: { ...(current.basics ?? {}), [key]: value } }));
+  }
+
   return (
     <div className="page-stack">
       <div className="toolbar">
@@ -376,6 +389,31 @@ export function ProfilePage() {
           )}
         </section>
       )}
+
+      <section className="panel form-panel">
+        <div className="panel-head">
+          <h2>个人信息</h2>
+          <span className="subtle">用于简历抬头（姓名 / 联系方式）</span>
+        </div>
+        <div className="repeat-fields">
+          {BASIC_FIELDS.map((field) => (
+            <label className={field.area ? "span-2" : ""} key={field.key}>
+              <span>{field.label}</span>
+              {field.area ? (
+                <textarea
+                  value={String(profile.basics?.[field.key] ?? "")}
+                  onChange={(event) => updateBasics(field.key, event.target.value)}
+                />
+              ) : (
+                <input
+                  value={String(profile.basics?.[field.key] ?? "")}
+                  onChange={(event) => updateBasics(field.key, event.target.value)}
+                />
+              )}
+            </label>
+          ))}
+        </div>
+      </section>
 
       {configs.map((config) => (
         <section className="panel form-panel" key={String(config.key)}>

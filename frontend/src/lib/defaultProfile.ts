@@ -1,6 +1,7 @@
 import type { Profile } from "../types";
 
 export const emptyProfile: Profile = {
+  basics: {},
   education: [],
   experiences: [],
   projects: [],
@@ -13,6 +14,14 @@ export const emptyProfile: Profile = {
 };
 
 export const demoProfile: Profile = {
+  basics: {
+    name: "林晓",
+    phone: "138-0000-0000",
+    email: "linxiao@example.com",
+    intended_position: "临床研究助理",
+    location: "上海",
+    summary: "临床医学硕士，具备临床研究设计与随访数据管理经验。"
+  },
   education: [
     {
       id: "edu-1",

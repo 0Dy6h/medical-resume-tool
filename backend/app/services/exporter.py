@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import io
 import os
-import zipfile
-from html import escape
 from pathlib import Path
 from typing import Any
 
+from docx import Document
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.oxml.ns import qn
+from docx.shared import Pt
 from fpdf import FPDF
 from fpdf.enums import XPos, YPos
 
@@ -39,41 +41,70 @@ def resume_to_plain_text(draft: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _split_identity(draft: dict[str, Any]) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
+    """Separate the identity header (name + contact) from the body sections."""
+    sections = draft.get("sections", [])
+    identity = next((section for section in sections if section.get("id") == "identity"), None)
+    body = [section for section in sections if section.get("id") != "identity"]
+    return identity, body
+
+
+def _identity_lines(identity: dict[str, Any]) -> tuple[str, list[str]]:
+    """Return (name, contact_lines) from an identity section's items."""
+    texts = [str(item.get("text", "")).strip() for item in (identity.get("items") or [])]
+    texts = [text for text in texts if text]
+    if not texts:
+        return "", []
+    return texts[0], texts[1:]
+
+
+def _apply_cjk_default_font(document: Document) -> None:
+    """Best-effort: hint a CJK font so Chinese renders cleanly. Word substitutes a
+    CJK font regardless, so failure here is non-fatal."""
+    try:
+        normal = document.styles["Normal"]
+        normal.font.name = "Microsoft YaHei"
+        rpr = normal.element.get_or_add_rPr()
+        rfonts = rpr.get_or_add_rFonts()
+        rfonts.set(qn("w:eastAsia"), "Microsoft YaHei")
+    except Exception:
+        pass
+
+
 def export_docx(draft: dict[str, Any]) -> bytes:
-    body = "".join(_paragraph(draft["title"], style="Title"))
-    for section in draft["sections"]:
-        body += "".join(_paragraph(section["title"], style="Heading1"))
+    """Render the resume draft as a real Word document via python-docx.
+
+    The applicant's name + contact line lead the document (resume header), then
+    each section renders as a heading with bulleted items.
+    """
+    document = Document()
+    _apply_cjk_default_font(document)
+    identity, body_sections = _split_identity(draft)
+
+    if identity:
+        name, contact_lines = _identity_lines(identity)
+        header = document.add_paragraph()
+        header.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        run = header.add_run(name or draft.get("title", ""))
+        run.bold = True
+        run.font.size = Pt(20)
+        for line in contact_lines:
+            paragraph = document.add_paragraph()
+            paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            paragraph.add_run(line)
+    else:
+        document.add_heading(draft["title"], level=0)
+
+    for section in body_sections:
+        document.add_heading(section.get("title", ""), level=1)
         for item in section.get("items", []):
-            body += "".join(_paragraph(item.get("text", ""), style="Normal"))
-    document_xml = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
-  <w:body>
-    {body}
-    <w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134"/></w:sectPr>
-  </w:body>
-</w:document>"""
-    content_types = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
-  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
-  <Default Extension="xml" ContentType="application/xml"/>
-  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
-</Types>"""
-    rels = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
-</Relationships>"""
+            text = str(item.get("text", "")).strip()
+            if text:
+                document.add_paragraph(text, style="List Bullet")
+
     buffer = io.BytesIO()
-    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr("[Content_Types].xml", content_types)
-        zf.writestr("_rels/.rels", rels)
-        zf.writestr("word/document.xml", document_xml)
+    document.save(buffer)
     return buffer.getvalue()
-
-
-def _paragraph(text: str, style: str = "Normal") -> list[str]:
-    escaped = escape(text)
-    style_xml = f"<w:pPr><w:pStyle w:val=\"{style}\"/></w:pPr>" if style != "Normal" else ""
-    return [f"<w:p>{style_xml}<w:r><w:t>{escaped}</w:t></w:r></w:p>"]
 
 
 def export_pdf(draft: dict[str, Any]) -> bytes:
@@ -91,13 +122,23 @@ def export_pdf(draft: dict[str, Any]) -> bytes:
     pdf.add_font("cjk", style="", fname=str(font_path))
     pdf.set_font("cjk", size=12)
 
-    # Title
-    pdf.set_font_size(16)
-    pdf.cell(0, 10, draft["title"], new_x=XPos.LMARGIN, new_y=YPos.NEXT, align="C")
-    pdf.ln(5)
+    identity, body_sections = _split_identity(draft)
 
-    # Sections
-    for section in draft["sections"]:
+    # Header: applicant name + contact, or the draft title as a fallback.
+    if identity:
+        name, contact_lines = _identity_lines(identity)
+        pdf.set_font_size(18)
+        pdf.multi_cell(pdf.epw, 10, name or draft.get("title", ""), align="C")
+        pdf.set_font_size(10)
+        for line in contact_lines:
+            pdf.multi_cell(pdf.epw, 6, line, align="C")
+        pdf.ln(4)
+    else:
+        pdf.set_font_size(16)
+        pdf.multi_cell(pdf.epw, 10, draft["title"], align="C")
+        pdf.ln(5)
+
+    for section in body_sections:
         pdf.set_font_size(14)
         pdf.cell(0, 8, section["title"], new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.set_font_size(11)

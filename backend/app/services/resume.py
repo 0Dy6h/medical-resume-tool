@@ -66,6 +66,20 @@ def _source_label(collection: str, item: dict[str, Any], index: int) -> str:
     return f"{title} #{index + 1}"
 
 
+# 医疗领域同义/近义词归并：requirement 与 fact 用不同措辞表达同一能力时也能命中。
+# 仅做加法（命中任一变体则补一个规范 token），不删除原有 token，避免回归。
+SYNONYM_GROUPS = {
+    "数据统计": ["统计", "spss", "sas", "stata", "r语言", "数据分析", "数据处理", "统计分析"],
+    "临床研究": ["临床研究", "临床试验", "gcp", "队列", "随访"],
+    "科研产出": ["科研", "课题", "基金", "论文", "发表", "sci"],
+    "护理": ["护理", "护士", "护师"],
+    "教学": ["教学", "带教", "授课", "讲师", "助教"],
+    "公共卫生": ["公共卫生", "流行病", "疾控", "预防医学"],
+    "英语能力": ["英语", "英文", "cet", "六级", "四级", "雅思", "托福"],
+    "药学": ["药学", "药师", "药物", "制剂"],
+}
+
+
 def _tokens(text: str) -> set[str]:
     normalized = normalize_text(text).lower()
     tokens = set()
@@ -75,6 +89,9 @@ def _tokens(text: str) -> set[str]:
     for keyword in ["临床研究", "数据分析", "SPSS", "Python", "护理", "科研", "教学", "随访", "伦理", "质控", "英语", "检验", "药学", "公共卫生"]:
         if keyword.lower() in normalized:
             tokens.add(keyword.lower())
+    for canonical, variants in SYNONYM_GROUPS.items():
+        if any(variant in normalized for variant in variants):
+            tokens.add(canonical)
     return tokens
 
 
@@ -122,18 +139,55 @@ def _evidence_strength(overlap_count: int, requirement_token_count: int) -> str:
     return "weak"
 
 
+CONTACT_FIELDS = [
+    ("phone", "电话"),
+    ("email", "邮箱"),
+    ("location", "所在地"),
+    ("intended_position", "求职意向"),
+]
+
+
+def _identity_section(profile: dict[str, Any]) -> dict[str, Any] | None:
+    """Build a resume header from user-provided personal facts.
+
+    Only includes fields the user actually filled in — same truth constraint as
+    the rest of the generator. Returns None when no identity info exists so older
+    profiles fall back to the previous (title-only) layout.
+    """
+    basics = profile.get("basics") or {}
+    name = str(basics.get("name") or "").strip()
+    contact_bits = []
+    for key, label in CONTACT_FIELDS:
+        value = str(basics.get(key) or "").strip()
+        if value:
+            contact_bits.append(f"{label}：{value}")
+    if not name and not contact_bits:
+        return None
+    items: list[dict[str, Any]] = [{"text": name or "（未填写姓名）"}]
+    if contact_bits:
+        items.append({"text": " ｜ ".join(contact_bits)})
+    summary = str(basics.get("summary") or "").strip()
+    if summary:
+        items.append({"text": summary})
+    return {"id": "identity", "title": "个人信息", "items": items}
+
+
 def build_resume_sections(profile: dict[str, Any], job: dict[str, Any], evidence: list[dict[str, Any]], gaps: list[dict[str, Any]]) -> list[dict[str, Any]]:
     evidence_by_collection: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for item in evidence:
         evidence_by_collection[item["collection"]].append(item)
 
-    sections: list[dict[str, Any]] = [
+    sections: list[dict[str, Any]] = []
+    identity = _identity_section(profile)
+    if identity:
+        sections.append(identity)
+    sections.append(
         {
             "id": "target",
             "title": "求职目标",
             "items": [{"text": f"应聘 {job['institution_name']} - {job['title']}，突出与岗位要求直接相关的真实经历。"}],
-        },
-    ]
+        }
+    )
     for collection, title in [
         ("education", "教育背景"),
         ("experiences", "工作/实习经历"),

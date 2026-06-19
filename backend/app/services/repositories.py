@@ -398,6 +398,7 @@ def get_profile(engine: DatabaseEngine, user_id: int) -> dict[str, Any]:
         row = conn.execute("SELECT data, updated_at FROM profiles WHERE user_id = ?", (user_id,)).fetchone()
     if row is None:
         return {
+            "basics": {},
             "education": [],
             "experiences": [],
             "projects": [],
@@ -411,6 +412,7 @@ def get_profile(engine: DatabaseEngine, user_id: int) -> dict[str, Any]:
         }
     data = from_json(row["data"], {})
     data.pop("basic", None)
+    data.setdefault("basics", {})
     data["updated_at"] = row["updated_at"]
     return data
 

@@ -122,6 +122,7 @@ export type ParserQuality = {
 };
 
 export type Profile = {
+  basics?: Record<string, unknown>;
   education: Array<Record<string, unknown>>;
   experiences: Array<Record<string, unknown>>;
   projects: Array<Record<string, unknown>>;

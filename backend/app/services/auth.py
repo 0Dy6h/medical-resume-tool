@@ -10,13 +10,22 @@ import base64
 import hashlib
 import hmac
 import json
+import logging
 import os
 import secrets
 import time
 
 
+logger = logging.getLogger(__name__)
+
 # 签名密钥：部署时务必通过环境变量 AUTH_SECRET 固定，否则进程重启后已签发的 token 全部失效。
 SECRET = os.getenv("AUTH_SECRET") or secrets.token_hex(32)
+
+if not os.getenv("AUTH_SECRET"):
+    logger.warning(
+        "AUTH_SECRET 未设置，已生成临时密钥；进程重启后所有已签发的登录 token 将立即失效。"
+        "生产部署请通过环境变量固定 AUTH_SECRET。"
+    )
 
 TOKEN_TTL_SECONDS = 7 * 24 * 3600
 _SCRYPT_PARAMS = {"n": 2**14, "r": 8, "p": 1, "dklen": 32}
