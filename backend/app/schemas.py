@@ -1,24 +1,166 @@
 from __future__ import annotations
 
 from datetime import date
-from typing import Any, Literal
+from typing import Any, Literal, Self
 
 from pydantic import BaseModel, Field
 
 
-class RegisterPayload(BaseModel):
-    username: str = Field(min_length=2, max_length=32)
-    password: str = Field(min_length=6, max_length=128)
+# ── Profile sub-models ───────────────────────────────────────────────
 
 
-class LoginPayload(BaseModel):
-    username: str = Field(min_length=1, max_length=32)
-    password: str = Field(min_length=1, max_length=128)
+class _HasOptionalId(BaseModel):
+    """Mixin for profile items that may carry a client-side ID."""
+
+    id: str | None = None
 
 
-class AuthOut(BaseModel):
-    token: str
-    username: str
+class BasicInfo(BaseModel):
+    """Profile basics: name, contact, intended position, and summary."""
+
+    name: str = ""
+    phone: str = ""
+    email: str = ""
+    location: str = ""
+    intended_position: str = ""
+    summary: str = ""
+
+
+class Skill(_HasOptionalId):
+    """A named skill with an optional proficiency level."""
+
+    name: str
+    level: Literal["beginner", "intermediate", "advanced", "expert"] | None = None
+
+
+class Experience(_HasOptionalId):
+    """Work or internship experience entry."""
+
+    organization: str
+    role: str = ""
+    start: str = ""
+    end: str = ""
+    highlights: list[str] = Field(default_factory=list)
+    skills: list[str] = Field(default_factory=list)
+
+
+class Education(_HasOptionalId):
+    """Educational background entry."""
+
+    school: str
+    degree: str = ""
+    major: str = ""
+    start: str = ""
+    end: str = ""
+    highlights: list[str] = Field(default_factory=list)
+
+
+class Project(_HasOptionalId):
+    """Research or project experience entry."""
+
+    name: str
+    role: str = ""
+    highlights: list[str] = Field(default_factory=list)
+    skills: list[str] = Field(default_factory=list)
+
+
+class Publication(_HasOptionalId):
+    """Published paper or academic output."""
+
+    title: str
+    journal: str = ""
+    year: str = ""
+    authors: str = ""
+    doi: str = ""
+
+
+class Certificate(_HasOptionalId):
+    """Professional certificate or qualification."""
+
+    name: str
+    issuer: str = ""
+    year: str = ""
+
+
+class Language(_HasOptionalId):
+    """Language proficiency entry."""
+
+    name: str
+    level: str = ""
+
+
+class Teaching(_HasOptionalId):
+    """Teaching or instructional experience entry."""
+
+    course: str
+    role: str = ""
+    institution: str = ""
+    year: str = ""
+
+
+class Award(_HasOptionalId):
+    """Honor or award entry."""
+
+    name: str
+    issuer: str = ""
+    year: str = ""
+    level: str = ""
+
+
+class Profile(BaseModel):
+    """Complete typed profile aggregating all curriculum vitae sections.
+
+    This is the canonical internal representation.  Use ``from_legacy_dict()``
+    to migrate old dict-format profiles (e.g. from SQLite).
+    """
+
+    basics: BasicInfo = Field(default_factory=BasicInfo)
+    education: list[Education] = Field(default_factory=list)
+    experiences: list[Experience] = Field(default_factory=list)
+    projects: list[Project] = Field(default_factory=list)
+    publications: list[Publication] = Field(default_factory=list)
+    certificates: list[Certificate] = Field(default_factory=list)
+    skills: list[Skill] = Field(default_factory=list)
+    teaching: list[Teaching] = Field(default_factory=list)
+    awards: list[Award] = Field(default_factory=list)
+    languages: list[Language] = Field(default_factory=list)
+
+    @classmethod
+    def from_legacy_dict(cls, data: dict[str, Any]) -> Profile:
+        """Migrate an old dict-format profile to the typed Profile model.
+
+        Handles the legacy ``basic`` key (renamed to ``basics``) and strips
+        repository-level metadata like ``updated_at``.
+        """
+        data = dict(data)
+        # Legacy key migration
+        if "basic" in data and "basics" not in data:
+            data["basics"] = data.pop("basic")
+        elif "basic" in data:
+            data.pop("basic")
+        data.setdefault("basics", {})
+        # Strip repository metadata
+        data.pop("updated_at", None)
+        return cls.model_validate(data)
+
+    @property
+    def is_empty(self) -> bool:
+        """Return True when no collections have any entries."""
+        collections = [
+            self.education,
+            self.experiences,
+            self.projects,
+            self.publications,
+            self.certificates,
+            self.skills,
+            self.teaching,
+            self.awards,
+            self.languages,
+        ]
+        return not any(collections)
+
+
+# ── Auth schemas ─────────────────────────────────────────────────────
 
 
 class InstitutionOut(BaseModel):
@@ -107,16 +249,36 @@ class AnalyticsSummary(BaseModel):
 
 
 class ProfilePayload(BaseModel):
-    basics: dict[str, Any] = Field(default_factory=dict)
-    education: list[dict[str, Any]] = Field(default_factory=list)
-    experiences: list[dict[str, Any]] = Field(default_factory=list)
-    projects: list[dict[str, Any]] = Field(default_factory=list)
-    publications: list[dict[str, Any]] = Field(default_factory=list)
-    certificates: list[dict[str, Any]] = Field(default_factory=list)
-    skills: list[dict[str, Any]] = Field(default_factory=list)
-    teaching: list[dict[str, Any]] = Field(default_factory=list)
-    awards: list[dict[str, Any]] = Field(default_factory=list)
-    languages: list[dict[str, Any]] = Field(default_factory=list)
+    """API payload for saving a profile.
+
+    Accepts the legacy dict format as well as typed sub-model objects via
+    the ``from_legacy_dict`` migration helper on ``Profile``.  The endpoint
+    converts this payload into a ``Profile`` internally.
+    """
+
+    basics: BasicInfo = Field(default_factory=BasicInfo)
+    education: list[Education] = Field(default_factory=list)
+    experiences: list[Experience] = Field(default_factory=list)
+    projects: list[Project] = Field(default_factory=list)
+    publications: list[Publication] = Field(default_factory=list)
+    certificates: list[Certificate] = Field(default_factory=list)
+    skills: list[Skill] = Field(default_factory=list)
+    teaching: list[Teaching] = Field(default_factory=list)
+    awards: list[Award] = Field(default_factory=list)
+    languages: list[Language] = Field(default_factory=list)
+
+    def to_profile(self) -> Profile:
+        """Convert this payload into a fully typed ``Profile``."""
+        return Profile.model_validate(self.model_dump())
+
+    @classmethod
+    def from_old_dict_body(cls, body: dict[str, Any]) -> ProfilePayload:
+        """Parse an arbitrary dict body (typed or legacy) into a ProfilePayload.
+
+        This keeps backward compatibility with the old ``dict[str, Any]``
+        values so the frontend does not need to change.
+        """
+        return cls(**body)
 
 
 class ReviewItem(BaseModel):
@@ -206,19 +368,3 @@ class ReportOut(BaseModel):
 
 ExportFormat = Literal["docx", "pdf"]
 ExportMode = Literal["application", "diagnostic"]
-
-
-# ── JD Structuring (P0-3) ────────────────────────────────────────────────
-
-class JDRequirement(BaseModel):
-    """Structured job requirement extracted by LLM."""
-    category: str = ""
-    requirement: str = ""
-    must_have: bool = True
-
-
-class StructuredJDOut(BaseModel):
-    """LLM-structured job description output."""
-    job_title: str = ""
-    requirements: list[JDRequirement] = Field(default_factory=list)
-    summary: str = ""

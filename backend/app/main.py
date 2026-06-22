@@ -15,12 +15,12 @@ from app.schemas import (
     ExportMode,
     ExportFormat,
     InstitutionOut,
-    JDRequirement,
     JobDetailOut,
     JobListOut,
     JobStatusOut,
     JobStatusPayload,
     LoginPayload,
+    Profile,
     ProfileImportOut,
     ProfilePayload,
     RegisterPayload,
@@ -29,14 +29,12 @@ from app.schemas import (
     ResumeDraftCreate,
     ResumeDraftOut,
     ResumeDraftUpdate,
-    StructuredJDOut,
 )
 from app.services.analytics import analytics_summary, generate_report
 from app.services.auth import hash_password, make_token, verify_password, verify_token
 from app.services.crawler import execute_crawl_run
 from app.services.database import DatabaseEngine, create_engine, init_db
 from app.services.exporter import export_docx, export_pdf
-from app.services.jd_structurer import structure_jd_from_job
 from app.services.profile_import import ProfileImportError, build_profile_contract, extract_profile_text
 from app.services.repositories import (
     create_crawl_run,
@@ -207,19 +205,6 @@ def create_app(database_url: str | None = None) -> FastAPI:
         delete_job_status(engine, user["id"], job_id)
         return Response(status_code=204)
 
-    @app.get("/api/jobs/{job_id}/structure", response_model=StructuredJDOut)
-    def job_structure(
-        job_id: int,
-        engine: Annotated[DatabaseEngine, Depends(get_engine)],
-        user: Annotated[dict | None, Depends(get_optional_user)] = None,
-    ) -> StructuredJDOut:
-        """Extract structured requirements from a job description using LLM."""
-        try:
-            job = get_job(engine, job_id, user_id=user["id"] if user else None)
-        except KeyError:
-            raise HTTPException(status_code=404, detail="岗位不存在") from None
-        return structure_jd_from_job(job)
-
     @app.get("/api/analytics/summary", response_model=AnalyticsSummary)
     def summary(
         engine: Annotated[DatabaseEngine, Depends(get_engine)],
@@ -245,7 +230,8 @@ def create_app(database_url: str | None = None) -> FastAPI:
         engine: Annotated[DatabaseEngine, Depends(get_engine)],
         user: Annotated[dict, Depends(get_current_user)],
     ) -> dict:
-        return get_profile(engine, user["id"])
+        profile_data = get_profile(engine, user["id"])
+        return profile_data.model_dump()
 
     @app.put("/api/profile")
     def put_profile(
@@ -253,7 +239,8 @@ def create_app(database_url: str | None = None) -> FastAPI:
         engine: Annotated[DatabaseEngine, Depends(get_engine)],
         user: Annotated[dict, Depends(get_current_user)],
     ) -> dict:
-        return save_profile(engine, user["id"], payload.model_dump())
+        profile = payload.to_profile()
+        return save_profile(engine, user["id"], profile)
 
     @app.post("/api/profile/import", response_model=ProfileImportOut)
     async def import_profile(
@@ -278,10 +265,10 @@ def create_app(database_url: str | None = None) -> FastAPI:
             job = get_job(engine, payload.job_id)
         except KeyError:
             raise HTTPException(status_code=404, detail="岗位不存在") from None
-        profile_data = get_profile(engine, user["id"])
-        if not any(profile_data.get(collection) for collection in PROFILE_COLLECTIONS):
+        profile = get_profile(engine, user["id"])
+        if profile.is_empty:
             raise HTTPException(status_code=400, detail="请先填写或导入履历内容")
-        draft = generate_resume_draft(profile_data, job)
+        draft = generate_resume_draft(profile, job)
         return persist_resume_draft(
             engine,
             user["id"],
