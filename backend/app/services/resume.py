@@ -3,8 +3,20 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import Any
 
+from app.schemas import (
+    BasicInfo,
+    Certificate,
+    Education,
+    Experience,
+    Language,
+    Profile,
+    Project,
+    Publication,
+    Skill,
+    Teaching,
+    Award,
+)
 from app.services.classifier import extract_requirements, normalize_text
-
 
 PROFILE_COLLECTIONS = [
     "education",
@@ -17,7 +29,6 @@ PROFILE_COLLECTIONS = [
     "awards",
     "languages",
 ]
-
 
 COLLECTION_TITLES = {
     "education": "教育经历",
@@ -32,10 +43,16 @@ COLLECTION_TITLES = {
 }
 
 
-def flatten_profile_facts(profile: dict[str, Any]) -> list[dict[str, Any]]:
+def _profile_collection_items(profile: Profile, collection: str) -> list[dict[str, Any]]:
+    """Return a collection's items as plain dicts for downstream processing."""
+    items = getattr(profile, collection)
+    return [item.model_dump() if hasattr(item, "model_dump") else item for item in items]
+
+
+def flatten_profile_facts(profile: Profile) -> list[dict[str, Any]]:
     facts = []
     for collection in PROFILE_COLLECTIONS:
-        for index, item in enumerate(profile.get(collection, []) or []):
+        for index, item in enumerate(_profile_collection_items(profile, collection)):
             field_id = item.get("id") or f"{collection}-{index + 1}"
             text_parts = []
             for value in item.values():
@@ -95,7 +112,8 @@ def _tokens(text: str) -> set[str]:
     return tokens
 
 
-def match_profile_to_job(profile: dict[str, Any], job: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def match_profile_to_job(profile: Profile, job: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Match profile facts against job requirements and return (evidence, gaps)."""
     facts = flatten_profile_facts(profile)
     requirements = extract_requirements(job.get("raw_text") or f"{job.get('requirements', '')} {job.get('responsibilities', '')}")
     evidence = []
@@ -147,18 +165,18 @@ CONTACT_FIELDS = [
 ]
 
 
-def _identity_section(profile: dict[str, Any]) -> dict[str, Any] | None:
+def _identity_section(profile: Profile) -> dict[str, Any] | None:
     """Build a resume header from user-provided personal facts.
 
     Only includes fields the user actually filled in — same truth constraint as
     the rest of the generator. Returns None when no identity info exists so older
     profiles fall back to the previous (title-only) layout.
     """
-    basics = profile.get("basics") or {}
-    name = str(basics.get("name") or "").strip()
+    basics = profile.basics
+    name = basics.name.strip()
     contact_bits = []
     for key, label in CONTACT_FIELDS:
-        value = str(basics.get(key) or "").strip()
+        value = str(getattr(basics, key, "") or "").strip()
         if value:
             contact_bits.append(f"{label}：{value}")
     if not name and not contact_bits:
@@ -166,13 +184,16 @@ def _identity_section(profile: dict[str, Any]) -> dict[str, Any] | None:
     items: list[dict[str, Any]] = [{"text": name or "（未填写姓名）"}]
     if contact_bits:
         items.append({"text": " ｜ ".join(contact_bits)})
-    summary = str(basics.get("summary") or "").strip()
+    summary = basics.summary.strip()
     if summary:
         items.append({"text": summary})
     return {"id": "identity", "title": "个人信息", "items": items}
 
 
-def build_resume_sections(profile: dict[str, Any], job: dict[str, Any], evidence: list[dict[str, Any]], gaps: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def build_resume_sections(
+    profile: Profile, job: dict[str, Any], evidence: list[dict[str, Any]], gaps: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Build resume sections from matched evidence and profile collections."""
     evidence_by_collection: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for item in evidence:
         evidence_by_collection[item["collection"]].append(item)
@@ -201,7 +222,7 @@ def build_resume_sections(profile: dict[str, Any], job: dict[str, Any], evidence
     ]:
         items = []
         matched_ids = {item["profile_field_id"] for item in evidence_by_collection.get(collection, [])}
-        for index, raw_item in enumerate(profile.get(collection, []) or []):
+        for index, raw_item in enumerate(_profile_collection_items(profile, collection)):
             field_id = raw_item.get("id") or f"{collection}-{index + 1}"
             if evidence and field_id not in matched_ids and collection not in {"education", "skills", "languages"}:
                 continue
@@ -240,7 +261,8 @@ def _format_profile_item(item: dict[str, Any]) -> str:
     return head or normalize_text(" ".join(str(value) for value in item.values() if not isinstance(value, (list, dict))))
 
 
-def generate_resume_draft(profile: dict[str, Any], job: dict[str, Any]) -> dict[str, Any]:
+def generate_resume_draft(profile: Profile, job: dict[str, Any]) -> dict[str, Any]:
+    """Generate a tailored resume draft from a typed Profile and a job dict."""
     evidence, gaps = match_profile_to_job(profile, job)
     sections = build_resume_sections(profile, job, evidence, gaps)
     title = f"{job['title']} 定制简历"

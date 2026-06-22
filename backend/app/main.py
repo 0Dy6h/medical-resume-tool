@@ -20,6 +20,7 @@ from app.schemas import (
     JobStatusOut,
     JobStatusPayload,
     LoginPayload,
+    Profile,
     ProfileImportOut,
     ProfilePayload,
     RegisterPayload,
@@ -229,7 +230,8 @@ def create_app(database_url: str | None = None) -> FastAPI:
         engine: Annotated[DatabaseEngine, Depends(get_engine)],
         user: Annotated[dict, Depends(get_current_user)],
     ) -> dict:
-        return get_profile(engine, user["id"])
+        profile_data = get_profile(engine, user["id"])
+        return profile_data.model_dump()
 
     @app.put("/api/profile")
     def put_profile(
@@ -237,7 +239,8 @@ def create_app(database_url: str | None = None) -> FastAPI:
         engine: Annotated[DatabaseEngine, Depends(get_engine)],
         user: Annotated[dict, Depends(get_current_user)],
     ) -> dict:
-        return save_profile(engine, user["id"], payload.model_dump())
+        profile = payload.to_profile()
+        return save_profile(engine, user["id"], profile)
 
     @app.post("/api/profile/import", response_model=ProfileImportOut)
     async def import_profile(
@@ -262,10 +265,10 @@ def create_app(database_url: str | None = None) -> FastAPI:
             job = get_job(engine, payload.job_id)
         except KeyError:
             raise HTTPException(status_code=404, detail="岗位不存在") from None
-        profile_data = get_profile(engine, user["id"])
-        if not any(profile_data.get(collection) for collection in PROFILE_COLLECTIONS):
+        profile = get_profile(engine, user["id"])
+        if profile.is_empty:
             raise HTTPException(status_code=400, detail="请先填写或导入履历内容")
-        draft = generate_resume_draft(profile_data, job)
+        draft = generate_resume_draft(profile, job)
         return persist_resume_draft(
             engine,
             user["id"],

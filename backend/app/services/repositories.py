@@ -11,6 +11,7 @@ from app.services.database import (
     rows_to_dicts,
     to_json,
 )
+from app.schemas import Profile
 
 
 def now_iso() -> str:
@@ -378,7 +379,11 @@ def get_user_by_id(engine: DatabaseEngine, user_id: int) -> dict[str, Any] | Non
     return dict(row) if row is not None else None
 
 
-def save_profile(engine: DatabaseEngine, user_id: int, profile: dict[str, Any]) -> dict[str, Any]:
+def save_profile(engine: DatabaseEngine, user_id: int, profile: Profile) -> dict[str, Any]:
+    """Persist a typed Profile as JSON in the profiles table.
+
+    Returns the profile as a JSON-safe dict with updated_at attached.
+    """
     updated = now_iso()
     with connect(engine) as conn:
         conn.execute(
@@ -387,34 +392,27 @@ def save_profile(engine: DatabaseEngine, user_id: int, profile: dict[str, Any]) 
             VALUES (?, ?, ?)
             ON CONFLICT(user_id) DO UPDATE SET data=excluded.data, updated_at=excluded.updated_at
             """,
-            (user_id, to_json(profile), updated),
+            (user_id, to_json(profile.model_dump()), updated),
         )
         conn.commit()
-    return {**profile, "updated_at": updated}
+    result = profile.model_dump()
+    result["updated_at"] = updated
+    return result
 
 
-def get_profile(engine: DatabaseEngine, user_id: int) -> dict[str, Any]:
+def get_profile(engine: DatabaseEngine, user_id: int) -> Profile:
+    """Load the user's stored profile as a typed ``Profile``.
+
+    Falls back to an empty profile when none exists.  Legacy dict-shaped JSON
+    is migrated through ``Profile.from_legacy_dict``.
+    """
     with connect(engine) as conn:
         row = conn.execute("SELECT data, updated_at FROM profiles WHERE user_id = ?", (user_id,)).fetchone()
     if row is None:
-        return {
-            "basics": {},
-            "education": [],
-            "experiences": [],
-            "projects": [],
-            "publications": [],
-            "certificates": [],
-            "skills": [],
-            "teaching": [],
-            "awards": [],
-            "languages": [],
-            "updated_at": None,
-        }
+        return Profile()
     data = from_json(row["data"], {})
-    data.pop("basic", None)
-    data.setdefault("basics", {})
-    data["updated_at"] = row["updated_at"]
-    return data
+    profile = Profile.from_legacy_dict(data)
+    return profile
 
 
 def create_resume_draft(engine: DatabaseEngine, user_id: int, job_id: int, title: str, sections: list[dict[str, Any]], evidence: list[dict[str, Any]], gaps: list[dict[str, Any]]) -> dict[str, Any]:
