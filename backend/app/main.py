@@ -15,6 +15,7 @@ from app.schemas import (
     ExportMode,
     ExportFormat,
     InstitutionOut,
+    JDRequirement,
     JobDetailOut,
     JobListOut,
     JobStatusOut,
@@ -28,12 +29,14 @@ from app.schemas import (
     ResumeDraftCreate,
     ResumeDraftOut,
     ResumeDraftUpdate,
+    StructuredJDOut,
 )
 from app.services.analytics import analytics_summary, generate_report
 from app.services.auth import hash_password, make_token, verify_password, verify_token
 from app.services.crawler import execute_crawl_run
 from app.services.database import DatabaseEngine, create_engine, init_db
 from app.services.exporter import export_docx, export_pdf
+from app.services.jd_structurer import structure_jd_from_job
 from app.services.profile_import import ProfileImportError, build_profile_contract, extract_profile_text
 from app.services.repositories import (
     create_crawl_run,
@@ -203,6 +206,19 @@ def create_app(database_url: str | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="岗位不存在") from None
         delete_job_status(engine, user["id"], job_id)
         return Response(status_code=204)
+
+    @app.get("/api/jobs/{job_id}/structure", response_model=StructuredJDOut)
+    def job_structure(
+        job_id: int,
+        engine: Annotated[DatabaseEngine, Depends(get_engine)],
+        user: Annotated[dict | None, Depends(get_optional_user)] = None,
+    ) -> StructuredJDOut:
+        """Extract structured requirements from a job description using LLM."""
+        try:
+            job = get_job(engine, job_id, user_id=user["id"] if user else None)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="岗位不存在") from None
+        return structure_jd_from_job(job)
 
     @app.get("/api/analytics/summary", response_model=AnalyticsSummary)
     def summary(
