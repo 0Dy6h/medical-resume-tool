@@ -94,7 +94,11 @@ def test_profile_is_isolated_per_user(tmp_path):
     assert profile_b["skills"] == []
 
     profile_a = client.get("/api/profile", headers=headers_a).json()
-    assert profile_a["skills"] == [{"id": "s1", "name": "SPSS"}]
+    # The typed Profile schema round-trips every declared field, so compare the
+    # fields the caller sent rather than the whole serialized shape.
+    assert len(profile_a["skills"]) == 1
+    assert profile_a["skills"][0]["id"] == "s1"
+    assert profile_a["skills"][0]["name"] == "SPSS"
 
 
 def test_resume_draft_not_visible_across_users(tmp_path):

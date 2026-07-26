@@ -151,7 +151,7 @@ def test_init_db_migrates_legacy_user_scoped_tables(tmp_path):
 
     init_db(engine)
 
-    assert get_profile(engine, 1)["skills"][0]["name"] == "临床研究"
+    assert get_profile(engine, 1).skills[0].name == "临床研究"
     assert get_resume_draft(engine, 1, 1)["title"] == "旧草稿"
     with connect(engine) as conn:
         profile_columns = {row["name"] for row in conn.execute("PRAGMA table_info(profiles)").fetchall()}
