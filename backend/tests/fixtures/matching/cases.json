@@ -1,0 +1,26 @@
+{
+  "profile_a": [
+    {"requirement": "具有队列研究设计与随访管理经验", "expect": ["a-ex1", "a-pj1"]},
+    {"requirement": "熟练使用统计软件进行数据分析", "expect": ["a-sk1", "a-ex1"]},
+    {"requirement": "具有临床试验方案撰写与伦理审查经验", "expect": ["a-ex1"]},
+    {"requirement": "能够独立完成课题申报", "expect": ["a-pj1"]},
+    {"requirement": "流行病与卫生统计学相关专业硕士及以上学历", "expect": ["a-ed1"]},
+    {"requirement": "具备良好的英语读写能力", "expect": ["a-sk2", "a-lang1"]},
+    {"requirement": "以第一作者发表学术论文", "expect": ["a-pub1"]},
+    {"requirement": "持有GCP证书", "expect": ["a-cert1"]},
+    {"requirement": "具有三年以上临床护理工作经验", "expect": null},
+    {"requirement": "熟悉财务预算与成本核算", "expect": null},
+    {"requirement": "具有大型设备采购招标经验", "expect": null}
+  ],
+  "profile_b": [
+    {"requirement": "具有PICC置管与静脉治疗操作能力", "expect": ["b-ex1", "b-cert2"]},
+    {"requirement": "熟练掌握心肺复苏等急救技能", "expect": ["b-sk1", "b-ex1"]},
+    {"requirement": "护理学专业本科及以上学历", "expect": ["b-ed1"]},
+    {"requirement": "持有护士执业资格证", "expect": ["b-cert1"]},
+    {"requirement": "承担临床护理带教工作", "expect": ["b-ex1", "b-teach1"]},
+    {"requirement": "能够熟练使用计算机办公软件", "expect": ["b-sk2"]},
+    {"requirement": "具有独立设计临床试验方案的经验", "expect": null},
+    {"requirement": "熟悉SPSS等统计分析软件", "expect": null},
+    {"requirement": "具有药品调剂与制剂经验", "expect": null}
+  ]
+}

@@ -53,9 +53,16 @@ def test_generate_resume_draft_keeps_target_first_without_basics():
     assert draft["sections"][0]["id"] == "target"
 
 
-def test_synonym_expansion_matches_statistics_requirement_to_spss_fact():
-    """统计学/数据处理 的要求应能命中只写了 SPSS/数据分析 的真实事实。"""
-    profile = profile_of(skills=[{"id": "s1", "name": "熟练使用 SPSS 进行数据分析"}])
+def test_semantic_match_bridges_spss_skill_to_a_statistics_requirement():
+    """A JD asking for 统计/数据处理 should match a real SPSS/统计分析 skill.
+
+    This is the semantic bridge the concept lexicon exists for: the requirement
+    and the fact share no wording beyond 数据, yet both map to the 统计分析
+    concept.  The skill is written as an applicant actually would (naming the
+    tool and what it was used for), which is what makes it a confident match
+    rather than a terse keyword.
+    """
+    profile = profile_of(skills=[{"id": "s1", "name": "熟练使用 SPSS、SAS 进行统计分析与数据处理"}])
     job = {
         "institution_name": "某医院",
         "title": "研究助理",
@@ -63,7 +70,19 @@ def test_synonym_expansion_matches_statistics_requirement_to_spss_fact():
     }
     evidence, _gaps = match_profile_to_job(profile, job)
     assert evidence
-    assert any("数据统计" in item["matched_terms"] for item in evidence)
+    assert evidence[0]["profile_field_id"] == "s1"
+    assert "统计分析" in evidence[0]["matched_terms"]
+
+
+def test_a_terse_off_wording_skill_stays_a_gap_not_a_false_match():
+    """Conservative by design: a bare skill that only bridges by concept — and is
+    lexically the same shape as a false near-match — is reported as a gap."""
+    profile = profile_of(experiences=[{"id": "ex1", "organization": "省人民医院临床研究中心", "role": "研究助理"}])
+    job = {"institution_name": "某医院", "title": "护理岗", "raw_text": "岗位要求：具有三年以上临床护理工作经验。"}
+    evidence, gaps = match_profile_to_job(profile, job)
+    # 临床研究 ≠ 临床护理 — must not be asserted as evidence.
+    assert not any(item["profile_field_id"] == "ex1" for item in evidence)
+    assert gaps
 
 
 # ── the exported document must not lose the user's real facts ────────

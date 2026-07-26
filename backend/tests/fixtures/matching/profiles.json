@@ -1,0 +1,48 @@
+{
+  "profile_a": {
+    "basics": {"name": "李研", "intended_position": "临床研究助理"},
+    "education": [
+      {"id": "a-ed1", "school": "华中科技大学同济医学院", "degree": "硕士", "major": "流行病与卫生统计学", "start": "2019", "end": "2022"}
+    ],
+    "experiences": [
+      {"id": "a-ex1", "organization": "省人民医院临床研究中心", "role": "研究助理", "highlights": ["负责糖尿病社区队列的基线调查与两年随访管理", "使用SPSS完成数据清洗与统计分析", "协助撰写临床试验方案并通过伦理审查"]}
+    ],
+    "projects": [
+      {"id": "a-pj1", "name": "老年高血压随访队列", "role": "数据管理", "highlights": ["独立完成课题申报书撰写", "维护受试者随访数据库"]}
+    ],
+    "publications": [
+      {"id": "a-pub1", "title": "社区糖尿病患者血糖控制影响因素分析", "journal": "中华流行病学杂志", "year": "2022"}
+    ],
+    "certificates": [
+      {"id": "a-cert1", "name": "GCP证书", "issuer": "国家药监局", "year": "2021"}
+    ],
+    "skills": [
+      {"id": "a-sk1", "name": "SPSS统计分析"},
+      {"id": "a-sk2", "name": "英语CET-6"},
+      {"id": "a-sk3", "name": "医学文献检索"}
+    ],
+    "languages": [
+      {"id": "a-lang1", "name": "英语", "level": "CET-6"}
+    ]
+  },
+  "profile_b": {
+    "basics": {"name": "王护", "intended_position": "临床护理"},
+    "education": [
+      {"id": "b-ed1", "school": "南方医科大学", "degree": "本科", "major": "护理学", "start": "2018", "end": "2022"}
+    ],
+    "experiences": [
+      {"id": "b-ex1", "organization": "三甲医院心内科病区", "role": "责任护士", "highlights": ["独立完成PICC置管维护与静脉治疗", "参与危重患者心电监护与急救配合", "承担新入职护士的带教工作"]}
+    ],
+    "certificates": [
+      {"id": "b-cert1", "name": "护士执业资格证", "issuer": "国家卫健委", "year": "2022"},
+      {"id": "b-cert2", "name": "PICC专科护理证书", "year": "2023"}
+    ],
+    "skills": [
+      {"id": "b-sk1", "name": "心肺复苏与急救护理"},
+      {"id": "b-sk2", "name": "计算机办公软件"}
+    ],
+    "teaching": [
+      {"id": "b-teach1", "course": "静脉治疗规范", "role": "带教老师", "institution": "护理部", "year": "2023"}
+    ]
+  }
+}
