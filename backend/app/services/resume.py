@@ -5,6 +5,7 @@ from typing import Any
 
 from app.schemas import PROFILE_COLLECTION_NAMES, Profile
 from app.services.classifier import normalize_text
+from app.services.matching.gates import DegreeGateResult, evaluate_degree_gate
 from app.services.matching.scorer import best_matches, strength_band
 from app.services.matching.segment import segment_requirements
 
@@ -106,20 +107,26 @@ def _source_label(collection: str, item: dict[str, Any], index: int) -> str:
 def match_profile_to_job(profile: Profile, job: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Match profile facts against job requirements and return (evidence, gaps).
 
-    Requirements are segmented from the announcement (:mod:`matching.segment`)
-    and each is scored against every profile fact in a CJK bigram token space
-    weighted by corpus IDF (:mod:`matching.scorer`).  A requirement with no fact
-    above threshold becomes a gap.  Every evidence row carries the
-    ``profile_field_id`` it came from, so the generated resume stays traceable
-    to the user's real input.
+    Requirements are segmented from the announcement (:mod:`matching.segment`).
+    A degree requirement is evaluated by the arithmetic degree gate
+    (:mod:`matching.gates`); every other requirement is scored against each
+    profile fact in a CJK bigram token space weighted by corpus IDF
+    (:mod:`matching.scorer`).  A requirement with no supporting fact becomes a
+    gap.  Every evidence row carries the ``profile_field_id`` it came from, so
+    the generated resume stays traceable to the user's real input.
     """
     facts = flatten_profile_facts(profile)
+    education = _profile_collection_items(profile, "education")
     raw_text = job.get("raw_text") or f"{job.get('requirements', '')} {job.get('responsibilities', '')}"
     requirements = segment_requirements(raw_text).requirements
 
     evidence: list[dict[str, Any]] = []
     gaps: list[dict[str, Any]] = []
     for requirement in requirements:
+        gate = evaluate_degree_gate(requirement, education)
+        if gate is not None:
+            _apply_degree_gate(requirement, gate, evidence, gaps)
+            continue
         matches = best_matches(requirement, facts)
         if not matches:
             gaps.append({"requirement": requirement, "message": f"未在你的履历中找到对应证据：{requirement}"})
@@ -138,6 +145,38 @@ def match_profile_to_job(profile: Profile, job: dict[str, Any]) -> tuple[list[di
                 }
             )
     return evidence, gaps
+
+
+def _apply_degree_gate(
+    requirement: str,
+    gate: DegreeGateResult,
+    evidence: list[dict[str, Any]],
+    gaps: list[dict[str, Any]],
+) -> None:
+    """Record a degree gate's outcome as evidence or a (possibly blocking) gap."""
+    if gate.outcome == "met":
+        evidence.append(
+            {
+                "requirement": requirement,
+                "profile_field_id": gate.profile_field_id,
+                "collection": "education",
+                "matched_terms": ["学历"],
+                "source_text": gate.message,
+                "source_label": "教育经历",
+                "score": 1.0,
+                "evidence_strength": "strong",
+                "gate": "degree",
+            }
+        )
+    else:
+        gaps.append(
+            {
+                "requirement": requirement,
+                "message": gate.message,
+                # not_met means categorically ineligible — the UI can flag it.
+                "blocking": gate.outcome == "not_met",
+            }
+        )
 
 
 CONTACT_FIELDS = [

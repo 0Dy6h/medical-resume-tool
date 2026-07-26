@@ -100,7 +100,7 @@ def full_profile() -> Profile:
     )
 
 
-NO_MATCH_JOB = {"institution_name": "某医院", "title": "研究岗", "raw_text": "岗位要求：本科及以上学历，具备良好沟通能力。"}
+NO_MATCH_JOB = {"institution_name": "某医院", "title": "研究岗", "raw_text": "岗位要求：具备良好的沟通能力与团队协作精神。"}
 ONE_MATCH_JOB = {"institution_name": "某医院", "title": "研究岗", "raw_text": "岗位要求：熟悉SPSS等统计软件，具备数据分析能力。"}
 
 
