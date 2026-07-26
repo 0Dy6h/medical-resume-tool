@@ -28,24 +28,44 @@ def _profile_collection_items(profile: Profile, collection: str) -> list[dict[st
     return [item.model_dump() if hasattr(item, "model_dump") else item for item in items]
 
 
+#: Fields excluded from a fact's searchable text.  ``id`` is an internal handle
+#: and ``doi``/``level`` are identifiers rather than描述性 content — including
+#: them lets an internal token be reported to the user as matched "evidence".
+FACT_TEXT_EXCLUDED_FIELDS = frozenset({"id", "doi", "level"})
+
+
+def _fact_text(item: dict[str, Any]) -> str:
+    """Build the searchable text for one profile item.
+
+    Only descriptive fields contribute.  A bare year is dropped too: it carries
+    no competency signal and collides across unrelated entries.
+    """
+    parts: list[str] = []
+    for key, value in item.items():
+        if key in FACT_TEXT_EXCLUDED_FIELDS:
+            continue
+        if isinstance(value, list):
+            parts.extend(str(entry) for entry in value)
+        elif isinstance(value, dict):
+            parts.extend(str(entry) for entry in value.values())
+        elif value is not None:
+            text = str(value)
+            if text.strip().isdigit():
+                continue
+            parts.append(text)
+    return normalize_text(" ".join(parts))
+
+
 def flatten_profile_facts(profile: Profile) -> list[dict[str, Any]]:
     facts = []
     for collection in PROFILE_COLLECTIONS:
         for index, item in enumerate(_profile_collection_items(profile, collection)):
             field_id = item.get("id") or f"{collection}-{index + 1}"
-            text_parts = []
-            for value in item.values():
-                if isinstance(value, list):
-                    text_parts.extend(str(v) for v in value)
-                elif isinstance(value, dict):
-                    text_parts.extend(str(v) for v in value.values())
-                elif value is not None:
-                    text_parts.append(str(value))
             facts.append(
                 {
                     "profile_field_id": field_id,
                     "collection": collection,
-                    "text": normalize_text(" ".join(text_parts)),
+                    "text": _fact_text(item),
                     "raw": item,
                     "source_label": _source_label(collection, item, index),
                 }
@@ -203,12 +223,22 @@ def build_resume_sections(
         matched_ids = {item["profile_field_id"] for item in evidence_by_collection.get(collection, [])}
         for index, raw_item in enumerate(_profile_collection_items(profile, collection)):
             field_id = raw_item.get("id") or f"{collection}-{index + 1}"
-            if evidence and field_id not in matched_ids and collection not in {"education", "skills", "languages"}:
-                continue
-            text = _format_profile_item(raw_item)
+            text = _format_profile_item(collection, raw_item)
             if text:
-                items.append({"text": text, "profile_field_id": field_id, "evidence_level": "matched" if field_id in matched_ids else "supporting"})
+                items.append(
+                    {
+                        "text": text,
+                        "profile_field_id": field_id,
+                        "evidence_level": "matched" if field_id in matched_ids else "supporting",
+                    }
+                )
         if items:
+            # Requirement-matched entries lead the section; nothing is removed.
+            # An unmatched entry means "the JD did not ask for this", not "this
+            # is untrue", and dropping it would silently delete real experience
+            # from a document the user submits.  `evidence_level` carries the
+            # distinction for the UI instead.
+            items.sort(key=lambda entry: entry["evidence_level"] != "matched")
             sections.append({"id": collection, "title": title, "items": items})
     if gaps:
         sections.append(
@@ -221,23 +251,66 @@ def build_resume_sections(
     return sections
 
 
-def _format_profile_item(item: dict[str, Any]) -> str:
-    preferred = [
-        "school",
-        "degree",
-        "major",
-        "organization",
-        "role",
-        "name",
-        "issuer",
-        "year",
-        "level",
-    ]
-    head = " / ".join(str(item[key]) for key in preferred if item.get(key))
-    highlights = item.get("highlights") or item.get("skills") or []
-    if isinstance(highlights, list) and highlights:
-        return f"{head}：{'；'.join(str(value) for value in highlights)}" if head else "；".join(str(value) for value in highlights)
-    return head or normalize_text(" ".join(str(value) for value in item.values() if not isinstance(value, (list, dict))))
+#: Which fields lead each collection's resume line, in reading order.
+#: Per-collection because one shared list cannot serve every shape: a flat
+#: ordering silently dropped `title` and `course`, so a publication rendered as
+#: nothing but its year.
+ITEM_HEAD_FIELDS = {
+    "education": ("school", "degree", "major"),
+    "experiences": ("organization", "role"),
+    "projects": ("name", "role"),
+    "publications": ("title", "journal", "year"),
+    "certificates": ("name", "issuer", "year"),
+    "skills": ("name", "level"),
+    "teaching": ("course", "role", "institution", "year"),
+    "awards": ("name", "issuer", "level", "year"),
+    "languages": ("name", "level"),
+}
+
+#: Fields never rendered into a resume line (internal or non-prose).
+ITEM_TEXT_EXCLUDED_FIELDS = frozenset({"id", "doi"})
+
+
+def _date_range(item: dict[str, Any]) -> str:
+    start = str(item.get("start") or "").strip()
+    end = str(item.get("end") or "").strip()
+    if start and end:
+        return f"{start}-{end}"
+    return start or end
+
+
+def _format_profile_item(collection: str, item: dict[str, Any]) -> str:
+    """Render one profile item as a resume line.
+
+    Only reorders and joins the user's own field values — no wording is
+    invented, which is what keeps the output traceable to the profile.
+    """
+    head_fields = ITEM_HEAD_FIELDS.get(collection, ())
+    parts = [str(item[key]).strip() for key in head_fields if str(item.get(key) or "").strip()]
+    period = _date_range(item)
+    if period:
+        parts.append(period)
+    head = " / ".join(parts)
+
+    details = item.get("highlights") or item.get("skills") or []
+    if isinstance(details, list):
+        details = [str(value).strip() for value in details if str(value).strip()]
+    else:
+        details = []
+    if details:
+        body = "；".join(details)
+        return f"{head}：{body}" if head else body
+    if head:
+        return head
+    # Unknown collection or an item whose head fields are all empty: fall back to
+    # its remaining prose so nothing the user typed disappears.
+    return normalize_text(
+        " ".join(
+            str(value)
+            for key, value in item.items()
+            if key not in ITEM_TEXT_EXCLUDED_FIELDS and not isinstance(value, (list, dict)) and value is not None
+        )
+    )
 
 
 def generate_resume_draft(profile: Profile, job: dict[str, Any]) -> dict[str, Any]:
