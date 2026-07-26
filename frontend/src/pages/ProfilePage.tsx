@@ -3,6 +3,7 @@ import { useRef, useEffect, useState } from "react";
 import { useToast } from "../components/Toast";
 import { api } from "../lib/api";
 import { demoProfile, emptyProfile } from "../lib/defaultProfile";
+import { mergeImportSelection } from "../lib/importMerge";
 import type { Profile, ProfileImportResult } from "../types";
 
 type Field = {
@@ -110,6 +111,7 @@ const configs: CollectionConfig[] = [
 ];
 
 const configByKey = new Map(configs.map((config) => [config.key, config] as const));
+const collectionKeys = configs.map((config) => config.key);
 
 const BASIC_FIELDS: Field[] = [
   { key: "name", label: "姓名" },
@@ -136,6 +138,20 @@ function toStoredValue(value: string, area?: boolean) {
 
 function collectionTitle(collection: string) {
   return configByKey.get(collection as keyof Profile)?.title ?? collection;
+}
+
+/**
+ * A new, empty row for a collection with every configured field present.
+ *
+ * The fields are spelled out rather than left absent so the row matches the
+ * shape the save endpoint expects; the backend drops rows that stay blank.
+ */
+function blankItem(config: CollectionConfig): Record<string, unknown> {
+  const item: Record<string, unknown> = { id: newId(String(config.key)) };
+  for (const field of config.fields) {
+    item[field.key] = field.area ? [] : "";
+  }
+  return item;
 }
 
 export function ProfilePage() {
@@ -201,32 +217,16 @@ export function ProfilePage() {
 
   function confirmImport() {
     if (!preview) return;
-    let count = 0;
-    setProfile((current) => {
-      const next = { ...current };
-      configs.forEach((config) => {
-        const items = (preview[config.key as keyof ProfileImportResult] as Array<Record<string, unknown>> | undefined) ?? [];
-        const accepted = items
-          .filter((_, index) => selectedKeys.has(`${String(config.key)}-${index}`))
-          .map((item) => ({ ...item, id: newId(String(config.key)) }));
-        if (accepted.length) {
-          count += accepted.length;
-          next[config.key] = [...((current[config.key] as Array<Record<string, unknown>>) ?? []), ...accepted] as never;
-        }
-      });
-      (preview.review_items ?? []).forEach((item, index) => {
-        const key = `review-${index}`;
-        if (!selectedKeys.has(key)) return;
-        const config = configByKey.get(item.collection as keyof Profile);
-        if (!config) return;
-        const accepted = { ...item.item, id: newId(item.collection) };
-        count += 1;
-        next[config.key] = [...((current[config.key] as Array<Record<string, unknown>>) ?? []), accepted] as never;
-      });
-      return next;
-    });
+    const { profile: merged, accepted } = mergeImportSelection(
+      profile,
+      preview,
+      selectedKeys,
+      collectionKeys,
+      newId
+    );
+    setProfile(merged);
     setPreview(null);
-    toast.success(`已导入 ${count} 条，请检查后保存`);
+    toast.success(`已导入 ${accepted} 条，请检查后保存`);
   }
 
   function previewItemSummary(config: CollectionConfig, item: Record<string, unknown>) {
@@ -244,7 +244,7 @@ export function ProfilePage() {
       ...current,
       [config.key]: [
         ...((current[config.key] as Array<Record<string, unknown>>) ?? []),
-        { id: newId(String(config.key)) }
+        blankItem(config)
       ]
     }));
   }

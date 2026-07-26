@@ -3,16 +3,54 @@ from __future__ import annotations
 from datetime import date
 from typing import Any, Literal, Self
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError, field_validator
 
 
 # ── Profile sub-models ───────────────────────────────────────────────
 
 
+SKILL_LEVELS = ("beginner", "intermediate", "advanced", "expert")
+
+# Legacy/free-text proficiency wording seen in profiles saved before the typed
+# schema landed.  Anything unrecognised degrades to None rather than 500-ing.
+_LEVEL_ALIASES = {
+    "入门": "beginner",
+    "了解": "beginner",
+    "初级": "beginner",
+    "一般": "intermediate",
+    "中级": "intermediate",
+    "掌握": "intermediate",
+    "熟悉": "intermediate",
+    "熟练": "advanced",
+    "高级": "advanced",
+    "精通": "expert",
+    "专家": "expert",
+}
+
+
 class _HasOptionalId(BaseModel):
-    """Mixin for profile items that may carry a client-side ID."""
+    """Mixin for profile items that may carry a client-side ID.
+
+    Every concrete item keeps all of its fields optional on purpose: the editor
+    creates a blank row first and the user fills it in progressively, so a
+    partially-typed row must round-trip instead of failing validation.  The
+    real invariant — *a persisted item is not entirely blank* — is enforced
+    once, at the payload boundary, by ``_drop_blank_items()``.
+    """
 
     id: str | None = None
+
+    @property
+    def is_blank(self) -> bool:
+        """True when the item carries no content beyond its client-side id."""
+        for name, value in self.model_dump(exclude={"id"}).items():
+            del name
+            if isinstance(value, list):
+                if any(str(entry).strip() for entry in value):
+                    return False
+            elif value is not None and str(value).strip():
+                return False
+        return True
 
 
 class BasicInfo(BaseModel):
@@ -29,14 +67,32 @@ class BasicInfo(BaseModel):
 class Skill(_HasOptionalId):
     """A named skill with an optional proficiency level."""
 
-    name: str
+    name: str = ""
     level: Literal["beginner", "intermediate", "advanced", "expert"] | None = None
+
+    @field_validator("level", mode="before")
+    @classmethod
+    def _coerce_level(cls, value: Any) -> Any:
+        """Map legacy free-text levels ("熟练") onto the enum; drop unknowns.
+
+        Pre-P0-1 profiles stored whatever the user typed here.  Rejecting those
+        rows would make the owning account's profile permanently unreadable, so
+        an unrecognised level degrades to None instead.
+        """
+        if value is None:
+            return None
+        text = str(value).strip()
+        if not text:
+            return None
+        if text.lower() in SKILL_LEVELS:
+            return text.lower()
+        return _LEVEL_ALIASES.get(text)
 
 
 class Experience(_HasOptionalId):
     """Work or internship experience entry."""
 
-    organization: str
+    organization: str = ""
     role: str = ""
     start: str = ""
     end: str = ""
@@ -47,7 +103,7 @@ class Experience(_HasOptionalId):
 class Education(_HasOptionalId):
     """Educational background entry."""
 
-    school: str
+    school: str = ""
     degree: str = ""
     major: str = ""
     start: str = ""
@@ -58,7 +114,7 @@ class Education(_HasOptionalId):
 class Project(_HasOptionalId):
     """Research or project experience entry."""
 
-    name: str
+    name: str = ""
     role: str = ""
     highlights: list[str] = Field(default_factory=list)
     skills: list[str] = Field(default_factory=list)
@@ -67,17 +123,28 @@ class Project(_HasOptionalId):
 class Publication(_HasOptionalId):
     """Published paper or academic output."""
 
-    title: str
+    title: str = ""
     journal: str = ""
     year: str = ""
     authors: str = ""
     doi: str = ""
 
+    @field_validator("authors", mode="before")
+    @classmethod
+    def _join_authors(cls, value: Any) -> Any:
+        """Accept the editor's multi-line author input as a single string.
+
+        The frontend renders 作者 as a textarea, which yields a list of lines.
+        """
+        if isinstance(value, (list, tuple)):
+            return "、".join(str(entry).strip() for entry in value if str(entry).strip())
+        return value
+
 
 class Certificate(_HasOptionalId):
     """Professional certificate or qualification."""
 
-    name: str
+    name: str = ""
     issuer: str = ""
     year: str = ""
 
@@ -85,14 +152,14 @@ class Certificate(_HasOptionalId):
 class Language(_HasOptionalId):
     """Language proficiency entry."""
 
-    name: str
+    name: str = ""
     level: str = ""
 
 
 class Teaching(_HasOptionalId):
     """Teaching or instructional experience entry."""
 
-    course: str
+    course: str = ""
     role: str = ""
     institution: str = ""
     year: str = ""
@@ -101,10 +168,25 @@ class Teaching(_HasOptionalId):
 class Award(_HasOptionalId):
     """Honor or award entry."""
 
-    name: str
+    name: str = ""
     issuer: str = ""
     year: str = ""
     level: str = ""
+
+
+#: Canonical order of the profile's item collections.  Single source of truth —
+#: ``resume.PROFILE_COLLECTIONS`` re-exports this.
+PROFILE_COLLECTION_NAMES = (
+    "education",
+    "experiences",
+    "projects",
+    "publications",
+    "certificates",
+    "skills",
+    "teaching",
+    "awards",
+    "languages",
+)
 
 
 class Profile(BaseModel):
@@ -131,6 +213,12 @@ class Profile(BaseModel):
 
         Handles the legacy ``basic`` key (renamed to ``basics``) and strips
         repository-level metadata like ``updated_at``.
+
+        Never raises on stored data.  Profiles written before the typed schema
+        landed may hold values this model cannot represent; losing one malformed
+        entry is recoverable, but a ``ValidationError`` here would make the
+        owning account's profile — and every export that reads it — permanently
+        unreadable.  Unparsable entries are therefore skipped individually.
         """
         data = dict(data)
         # Legacy key migration
@@ -141,23 +229,40 @@ class Profile(BaseModel):
         data.setdefault("basics", {})
         # Strip repository metadata
         data.pop("updated_at", None)
-        return cls.model_validate(data)
+        try:
+            return cls.model_validate(data)
+        except ValidationError:
+            return cls._salvage(data)
+
+    @classmethod
+    def _salvage(cls, data: dict[str, Any]) -> Profile:
+        """Rebuild a Profile from legacy data, dropping only what cannot parse."""
+        salvaged: dict[str, Any] = {}
+        try:
+            salvaged["basics"] = BasicInfo.model_validate(data.get("basics") or {})
+        except ValidationError:
+            salvaged["basics"] = BasicInfo()
+        for name, field in cls.model_fields.items():
+            if name == "basics":
+                continue
+            item_model = field.annotation.__args__[0]  # list[Item] -> Item
+            kept = []
+            for entry in data.get(name) or []:
+                try:
+                    kept.append(item_model.model_validate(entry))
+                except ValidationError:
+                    continue
+            salvaged[name] = kept
+        return cls(**salvaged)
 
     @property
     def is_empty(self) -> bool:
-        """Return True when no collections have any entries."""
-        collections = [
-            self.education,
-            self.experiences,
-            self.projects,
-            self.publications,
-            self.certificates,
-            self.skills,
-            self.teaching,
-            self.awards,
-            self.languages,
-        ]
-        return not any(collections)
+        """Return True when no collection holds an item with any content."""
+        return not any(
+            item for name in PROFILE_COLLECTION_NAMES
+            for item in getattr(self, name)
+            if not item.is_blank
+        )
 
 
 # ── Auth schemas ─────────────────────────────────────────────────────
@@ -286,8 +391,17 @@ class ProfilePayload(BaseModel):
     languages: list[Language] = Field(default_factory=list)
 
     def to_profile(self) -> Profile:
-        """Convert this payload into a fully typed ``Profile``."""
-        return Profile.model_validate(self.model_dump())
+        """Convert this payload into a fully typed ``Profile``.
+
+        Rows the user added in the editor but never filled in are dropped here
+        rather than rejected, so an untouched blank row cannot block a save that
+        is otherwise valid.
+        """
+        data = self.model_dump()
+        for name in PROFILE_COLLECTION_NAMES:
+            items = getattr(self, name)
+            data[name] = [item.model_dump() for item in items if not item.is_blank]
+        return Profile.model_validate(data)
 
     @classmethod
     def from_old_dict_body(cls, body: dict[str, Any]) -> ProfilePayload:

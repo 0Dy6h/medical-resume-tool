@@ -3,32 +3,11 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import Any
 
-from app.schemas import (
-    BasicInfo,
-    Certificate,
-    Education,
-    Experience,
-    Language,
-    Profile,
-    Project,
-    Publication,
-    Skill,
-    Teaching,
-    Award,
-)
+from app.schemas import PROFILE_COLLECTION_NAMES, Profile
 from app.services.classifier import extract_requirements, normalize_text
 
-PROFILE_COLLECTIONS = [
-    "education",
-    "experiences",
-    "projects",
-    "publications",
-    "certificates",
-    "skills",
-    "teaching",
-    "awards",
-    "languages",
-]
+#: Re-exported for callers that already import it from here.
+PROFILE_COLLECTIONS = list(PROFILE_COLLECTION_NAMES)
 
 COLLECTION_TITLES = {
     "education": "教育经历",
