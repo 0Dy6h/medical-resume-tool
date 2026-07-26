@@ -10,7 +10,8 @@
 - 规则化岗位抽取、去重、标签、分析报告，并支持从公开官网公告的 xlsx 附件中抽取岗位表。
 - 分析页提供解析器质量 review：按 `parser_name` 聚合岗位量、平均置信度、附件来源、低置信和附件失败事件。
 - 岗位详情保留来源证据：`source_url`、`source_text_hash`、`fetched_at`、`parser_name`，附件解析岗位还保留公告 URL、附件 URL、sheet 和行号。
-- 真实履历约束：简历草稿的强化表达只来自用户结构化字段，并展示匹配证据和缺口。
+- 真实履历约束：简历草稿只重排用户填写的字段，不改写、不编造；每条证据锚定到 `profile_field_id`。
+- 语义化的岗位匹配：先从公告中切分出真正的岗位要求（丢弃报名流程与机构自我介绍），再用中文二元分词 + IDF 加权做证据匹配；学历这类有序要求用算术门槛判定，学历不满足会给出“硬性条件不满足”的阻断提示，而不是照样生成简历。
 - “我的履历”包含个人信息（姓名/联系方式/求职意向），并支持从 DOCX、文本型 PDF、TXT、Markdown 和常见图片导入资料；图片/扫描 PDF 的文字识别依赖本机 Tesseract OCR。
 - DOCX/PDF 导出端点：DOCX 由 python-docx 生成，简历以个人信息抬头（姓名+联系方式）开头，可直接投递。
 
@@ -19,7 +20,7 @@
 - 架构说明：`docs/architecture.md`
 - 运维/启动手册：`docs/runbook.md`
 - Agent 接手规则：`AGENTS.md`
-- 当前交接：`docs/handoffs/2026-06-19-end-of-day.md`
+- 当前交接：`docs/handoffs/2026-07-26-end-of-day.md`
 - 当前线上部署记录：`docs/deployments/tencent-cloud-cvm-2026-06-18/README.md`
 
 ## 后端

@@ -15,7 +15,7 @@ The MVP is a local web application with a FastAPI backend, SQLite persistence, a
 7. Login/register issues signed bearer tokens for private profile, import, draft, export, and job-status endpoints.
 8. The profile form saves structured user facts as JSON under the signed-in user.
 9. Optional per-user job status stores private triage state, notes, and deadlines without changing public job records.
-10. Resume generation matches job requirements against profile facts and stores only sourced evidence.
+10. Resume generation segments job requirements, matches them against profile facts (semantic bigram scoring plus an arithmetic degree gate), and stores only sourced evidence.
 11. Exports render the stored draft as DOCX or PDF. Application exports omit internal gap diagnostics by default; diagnostic exports are explicit.
 
 ## Main Tables
@@ -41,6 +41,7 @@ The MVP is a local web application with a FastAPI backend, SQLite persistence, a
 - `GET /api/jobs/{id}`
 - `PUT /api/jobs/{job_id}/status`
 - `DELETE /api/jobs/{job_id}/status`
+- `GET /api/jobs/{job_id}/structure`
 - `GET /api/analytics/summary`
 - `POST /api/reports`
 - `GET /api/profile`
@@ -53,7 +54,18 @@ The MVP is a local web application with a FastAPI backend, SQLite persistence, a
 
 ## Resume Truth Constraint
 
-The resume generator flattens the structured profile into facts with `profile_field_id`, matches requirements by rule-based keyword overlap, and writes every evidence item with a `profile_field_id`, readable `source_label`, `matched_terms`, and `evidence_strength`. Gaps use the wording `未在你的履历中找到对应证据` and do not suggest fabrication.
+The resume generator flattens the structured profile into facts with `profile_field_id`, and writes every evidence item with a `profile_field_id`, readable `source_label`, `matched_terms`, and `evidence_strength`. No wording is invented — a resume line reorders and joins the user's own field values. Gaps use the wording `未在你的履历中找到对应证据` and do not suggest fabrication.
+
+## Requirement Matching
+
+`backend/app/services/matching/` replaces the earlier whitespace-token keyword overlap, which could not tokenize Chinese (no word boundaries) and matched only on a small hardcoded keyword list.
+
+- `segment.py` locates the requirement block by heading, splits enumerated clauses out of the whitespace-collapsed announcement text, and drops application procedure and employer self-description. Returns a warning (rather than a fabricated requirement) when no requirements are found, e.g. when they live in an attachment.
+- `tokenize.py` produces CJK character bigrams so differently-worded terms sharing a sub-term still overlap; Latin acronyms (`SPSS`, `GCP`) are kept whole.
+- `scorer.py` ranks facts per requirement by IDF-weighted overlap (weights committed in `app/data/jd_idf.json`, built offline by `scripts/build_idf.py` — never recomputed from live user data) plus a small concept lexicon. It is deliberately conservative: a weak concept-only bridge stays a gap rather than asserting a low-confidence match.
+- `gates.py` evaluates degree/学历 requirements by ordinal comparison (大专 < 本科 < 硕士 < 博士), which similarity scoring cannot do. A requirement the applicant categorically fails (e.g. a 博士-only post for a 硕士 holder) becomes a **blocking** gap instead of a generated resume.
+
+Matching quality is guarded by a labeled eval set (`backend/tests/test_matching_eval.py`) with hard bars on top-1 source accuracy, zero wrong-source attributions, and zero false positives on negative cases, over one tuning profile and one held-out profile.
 
 ## Current Source Strategy
 

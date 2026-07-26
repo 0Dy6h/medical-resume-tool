@@ -44,8 +44,9 @@ pnpm dev
 - `backend/app/services/adapters/njmu.py` - 南京医科大学 listing+announcement parser.
 - `backend/app/services/adapters/hrbmu.py` - 哈尔滨医科大学 listing+table parser.
 - `backend/app/services/adapters/bjmu.py` - 北京大学医学部 listing+announcement parser.
-- `backend/app/services/classifier.py` - rule-based category and tag extraction.
-- `backend/app/services/resume.py` - profile-to-job matching and truthful resume draft generation.
+- `backend/app/services/classifier.py` - rule-based category and tag extraction; still writes the persisted `jobs.requirements` column and job filters (do not change without a data migration).
+- `backend/app/services/matching/` - requirement segmentation (`segment.py`), CJK bigram tokenizer (`tokenize.py`), IDF-weighted semantic scorer (`scorer.py`), and the arithmetic degree gate (`gates.py`). `app/data/jd_idf.json` is the committed IDF table, rebuilt offline by `backend/scripts/build_idf.py`.
+- `backend/app/services/resume.py` - profile-to-job matching (delegates to `matching/`) and truthful resume draft generation.
 - `backend/app/services/exporter.py` - DOCX/PDF export.
 - `backend/fixtures/nfyy/` - saved HTML fixtures for offline adapter testing.
 - `backend/fixtures/z2hospital/` - 浙大二院 fixture HTML.
@@ -60,3 +61,5 @@ pnpm dev
 ## Verification Discipline
 
 Run backend tests after backend changes. Run `pnpm test`, `pnpm typecheck`, and `pnpm build` after frontend changes. For cross-stack behavior, start both services and verify `/health`, `/api/jobs`, `/api/analytics/summary`, and `http://127.0.0.1:5173`.
+
+When changing the requirement matcher (`backend/app/services/matching/`), keep `backend/tests/test_matching_eval.py` green — it enforces top-1 source accuracy, zero wrong-source attributions, and zero false positives over a tuning and a held-out profile. If you change `segment.py`, regenerate the IDF table with `python -m scripts.build_idf` (from `backend/`) so `app/data/jd_idf.json` stays reproducible.

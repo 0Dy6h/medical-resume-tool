@@ -187,7 +187,10 @@ export function ResumePage() {
                 <div className="empty-line">未发现明显缺口</div>
               ) : (
                 draft.gaps.map((gap, index) => (
-                  <div className="gap-card" key={`${gap.requirement}-${index}`}>{gap.message}</div>
+                  <div className={`gap-card${gap.blocking ? " gap-card-blocking" : ""}`} key={`${gap.requirement}-${index}`}>
+                    {gap.blocking && <strong className="gap-blocking-label">硬性条件不满足</strong>}
+                    {gap.message}
+                  </div>
                 ))
               )}
             </div>

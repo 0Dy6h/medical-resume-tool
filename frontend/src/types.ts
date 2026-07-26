@@ -179,7 +179,7 @@ export type ResumeDraft = {
   title: string;
   sections: ResumeSection[];
   evidence: Array<Record<string, unknown>>;
-  gaps: Array<{ requirement: string; message: string }>;
+  gaps: Array<{ requirement: string; message: string; blocking?: boolean }>;
   created_at: string;
   updated_at: string;
 };

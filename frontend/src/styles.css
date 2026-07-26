@@ -961,6 +961,21 @@ pre {
   line-height: 1.5;
 }
 
+.gap-card-blocking {
+  border-color: var(--red);
+  border-left-width: 4px;
+  background: #fff1ef;
+  font-weight: 500;
+}
+
+.gap-blocking-label {
+  display: block;
+  font-size: 12px;
+  letter-spacing: 0.03em;
+  text-transform: none;
+  margin-bottom: 2px;
+}
+
 .empty-line {
   min-height: 42px;
   display: grid;
