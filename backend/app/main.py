@@ -285,14 +285,16 @@ def create_app(database_url: str | None = None) -> FastAPI:
         if profile.is_empty:
             raise HTTPException(status_code=400, detail="请先填写或导入履历内容")
         draft = generate_resume_draft(profile, job)
-        return persist_resume_draft(
-            engine,
-            user["id"],
-            payload.job_id,
-            draft["title"],
-            draft["sections"],
-            draft["evidence"],
-            draft["gaps"],
+        return _with_computed_status(
+            persist_resume_draft(
+                engine,
+                user["id"],
+                payload.job_id,
+                draft["title"],
+                draft["sections"],
+                draft["evidence"],
+                draft["gaps"],
+            )
         )
 
     @app.get("/api/resume-drafts/{draft_id}", response_model=ResumeDraftOut)
@@ -302,7 +304,7 @@ def create_app(database_url: str | None = None) -> FastAPI:
         user: Annotated[dict, Depends(get_current_user)],
     ) -> dict:
         try:
-            return get_resume_draft(engine, user["id"], draft_id)
+            return _with_computed_status(get_resume_draft(engine, user["id"], draft_id))
         except KeyError:
             raise HTTPException(status_code=404, detail="简历草稿不存在") from None
 
@@ -314,7 +316,9 @@ def create_app(database_url: str | None = None) -> FastAPI:
         user: Annotated[dict, Depends(get_current_user)],
     ) -> dict:
         try:
-            return update_resume_draft_sections(engine, user["id"], draft_id, payload.sections)
+            return _with_computed_status(
+                update_resume_draft_sections(engine, user["id"], draft_id, payload.sections)
+            )
         except KeyError:
             raise HTTPException(status_code=404, detail="简历草稿不存在") from None
 
@@ -386,14 +390,34 @@ def get_optional_user(
     return user
 
 
+def _compute_draft_status(draft: dict) -> str:
+    """Return 'reviewed' when every section item carries a valid decision."""
+    items = [item for section in draft.get("sections", []) for item in section.get("items", [])]
+    if not items:
+        return "draft"
+    return "reviewed" if all(item.get("decision") in ("adopt", "edit", "remove") for item in items) else "draft"
+
+
+def _with_computed_status(draft: dict) -> dict:
+    """Inject computed review status into a draft dict for the response model."""
+    return {**draft, "status": _compute_draft_status(draft)}
+
+
 def _draft_for_export(draft: dict, mode: ExportMode) -> dict:
+    sections = [
+        {
+            **section,
+            "items": [item for item in section.get("items", []) if item.get("decision") != "remove"],
+        }
+        for section in draft.get("sections", [])
+    ]
     if mode == "diagnostic":
-        return draft
+        return {**draft, "sections": sections}
     return {
         **draft,
         "sections": [
             section
-            for section in draft.get("sections", [])
+            for section in sections
             if section.get("id") != "gaps" and section.get("title") != "投递前需补充确认"
         ],
     }

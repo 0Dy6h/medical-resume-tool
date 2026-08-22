@@ -842,3 +842,69 @@ def test_pdf_export_accepts_chinese_resume_content(tmp_path):
 
     assert pdf.status_code == 200
     assert pdf.content.startswith(b"%PDF")
+
+
+def test_resume_draft_decision_status_and_export_filtering(tmp_path):
+    """PRD 4.4 review layer: computed status, decision persistence, remove filtering."""
+    client = make_client(tmp_path)
+    auth = auth_headers(client)
+    crawl_and_wait(client, [1])
+    job = client.get("/api/jobs", params={"keyword": "科研"}).json()["items"][0]
+
+    profile_payload = {
+        "basics": {"name": "审阅测试"},
+        "education": [{"id": "edu-1", "school": "复旦大学", "degree": "硕士", "major": "临床医学"}],
+        "skills": [{"id": "skill-1", "name": "SPSS"}],
+    }
+    client.put("/api/profile", json=profile_payload, headers=auth)
+
+    # ── ① Fresh draft (no decisions) → status="draft", items treated as adopt ──
+    draft = client.post("/api/resume-drafts", json={"job_id": job["id"]}, headers=auth).json()
+    assert draft["status"] == "draft"
+    assert draft["sections"]
+    fetched = client.get(f"/api/resume-drafts/{draft['id']}", headers=auth).json()
+    assert fetched["status"] == "draft"
+    for section in fetched["sections"]:
+        for item in section["items"]:
+            assert "decision" not in item or item.get("decision") is None
+
+    # ── ② PUT with some decisions → still draft; decision persisted ──
+    sections = fetched["sections"]
+    sections[0]["items"][0]["decision"] = "adopt"
+    updated = client.put(f"/api/resume-drafts/{draft['id']}", json={"sections": sections}, headers=auth).json()
+    assert updated["status"] == "draft"
+    assert updated["sections"][0]["items"][0]["decision"] == "adopt"
+
+    # ── ③ All items decided → reviewed ──
+    for section in sections:
+        for item in section["items"]:
+            if "decision" not in item:
+                item["decision"] = "adopt"
+    updated = client.put(f"/api/resume-drafts/{draft['id']}", json={"sections": sections}, headers=auth).json()
+    assert updated["status"] == "reviewed"
+
+    # ── ④ Remove item filtered from both export modes ──
+    remove_text = sections[0]["items"][0]["text"]
+    sections[0]["items"][0]["decision"] = "remove"
+    client.put(f"/api/resume-drafts/{draft['id']}", json={"sections": sections}, headers=auth)
+
+    app_docx = client.post(
+        f"/api/resume-drafts/{draft['id']}/export",
+        params={"format": "docx", "mode": "application"},
+        headers=auth,
+    )
+    assert app_docx.status_code == 200
+    assert remove_text not in docx_document_xml(app_docx.content)
+
+    diag_docx = client.post(
+        f"/api/resume-drafts/{draft['id']}/export",
+        params={"format": "docx", "mode": "diagnostic"},
+        headers=auth,
+    )
+    assert diag_docx.status_code == 200
+    assert remove_text not in docx_document_xml(diag_docx.content)
+
+    # ── ⑤ Remove only marks, does not delete archive data ──
+    rechecked = client.get(f"/api/resume-drafts/{draft['id']}", headers=auth).json()
+    assert rechecked["sections"][0]["items"][0]["decision"] == "remove"
+    assert rechecked["sections"][0]["items"][0]["text"] == remove_text

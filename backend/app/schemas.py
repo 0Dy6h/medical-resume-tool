@@ -486,6 +486,7 @@ class ResumeDraftOut(BaseModel):
     sections: list[dict[str, Any]]
     evidence: list[dict[str, Any]]
     gaps: list[dict[str, Any]]
+    status: str = "draft"
     created_at: str
     updated_at: str
 

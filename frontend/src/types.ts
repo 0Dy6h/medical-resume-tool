@@ -171,6 +171,7 @@ export type ResumeSection = {
     text: string;
     profile_field_id?: string;
     evidence_level?: string;
+    decision?: "adopt" | "edit" | "remove";
   }>;
 };
 
@@ -182,6 +183,7 @@ export type ResumeDraft = {
   sections: ResumeSection[];
   evidence: Array<Record<string, unknown>>;
   gaps: Array<{ requirement: string; message: string; blocking?: boolean }>;
+  status?: string;
   created_at: string;
   updated_at: string;
 };
