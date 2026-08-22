@@ -350,6 +350,7 @@ class JobOut(BaseModel):
     parser_name: str
     confidence: float
     user_status: dict[str, Any] | None = None
+    match: dict[str, Any] | None = None
 
 
 class JobListOut(BaseModel):

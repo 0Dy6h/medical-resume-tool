@@ -57,7 +57,7 @@ from app.services.repositories import (
     upsert_job_status,
     create_resume_draft as persist_resume_draft,
 )
-from app.services.resume import PROFILE_COLLECTIONS, generate_resume_draft
+from app.services.resume import PROFILE_COLLECTIONS, attach_job_matches, generate_resume_draft
 
 
 DEFAULT_DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./data/app.db")
@@ -140,7 +140,7 @@ def create_app(database_url: str | None = None) -> FastAPI:
         limit: Annotated[int, Query(ge=1, le=500)] = 100,
         offset: Annotated[int, Query(ge=0)] = 0,
     ) -> dict:
-        return list_jobs(
+        result = list_jobs(
             engine,
             {
                 "keyword": keyword,
@@ -155,6 +155,8 @@ def create_app(database_url: str | None = None) -> FastAPI:
             },
             user_id=user["id"] if user else None,
         )
+        result["items"] = attach_job_matches(engine, result["items"], user["id"] if user else None)
+        return result
 
     @app.get("/api/jobs/{job_id}", response_model=JobDetailOut)
     def job_detail(

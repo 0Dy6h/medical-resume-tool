@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from app.schemas import PROFILE_COLLECTION_NAMES, Profile
 from app.services.classifier import normalize_text
 from app.services.matching.gates import DegreeGateResult, evaluate_degree_gate
 from app.services.matching.scorer import best_matches, strength_band
 from app.services.matching.segment import segment_requirements
+from app.services.repositories import get_profile
+
+if TYPE_CHECKING:
+    from app.services.database import DatabaseEngine
 
 #: Re-exported for callers that already import it from here.
 PROFILE_COLLECTIONS = list(PROFILE_COLLECTION_NAMES)
@@ -342,3 +346,40 @@ def generate_resume_draft(profile: Profile, job: dict[str, Any]) -> dict[str, An
     sections = build_resume_sections(profile, job, evidence, gaps)
     title = f"{job['title']} 定制简历"
     return {"title": title, "sections": sections, "evidence": evidence, "gaps": gaps}
+
+
+def summarize_match(evidence: list[dict[str, Any]], gaps: list[dict[str, Any]]) -> dict[str, Any]:
+    """Collapse (evidence, gaps) into a per-job match summary.
+
+    Counts *requirements*, not evidence rows: one requirement that matches
+    several facts is still a single met requirement.  ``total`` is the number
+    of distinct requirements evaluated; ``met`` is how many were satisfied.
+    """
+    met_reqs = {e.get("requirement") for e in evidence}
+    gap_reqs = {g.get("requirement") for g in gaps}
+    met = len(met_reqs)
+    total = met + len(gap_reqs)
+    degree = round(met / total * 100) if total else 0
+    blocking = any(bool(g.get("blocking")) for g in gaps)
+    return {"met": met, "total": total, "degree_percent": degree, "blocking_gap": blocking}
+
+
+def attach_job_matches(
+    engine: "DatabaseEngine", jobs: list[dict[str, Any]], user_id: int | None
+) -> list[dict[str, Any]]:
+    """Attach a ``match`` summary to each job for the given user.
+
+    Returns jobs unchanged-shaped with an added ``match`` key:
+    - when ``user_id`` is None or the user has no profile → ``match=None``
+    - otherwise → result of ``summarize_match`` over ``match_profile_to_job``
+    """
+    if not user_id:
+        return [{**job, "match": None} for job in jobs]
+    profile = get_profile(engine, user_id)
+    if profile.is_empty:
+        return [{**job, "match": None} for job in jobs]
+    out = []
+    for job in jobs:
+        evidence, gaps = match_profile_to_job(profile, job)
+        out.append({**job, "match": summarize_match(evidence, gaps)})
+    return out

@@ -24,6 +24,13 @@ export type CrawlRun = {
   errors?: Array<Record<string, unknown>>;
 };
 
+export type JobMatch = {
+  met: number;
+  total: number;
+  degree_percent: number;
+  blocking_gap: boolean;
+};
+
 export type Job = {
   id: number;
   institution_id: number;
@@ -47,6 +54,7 @@ export type Job = {
   parser_name: string;
   confidence: number;
   user_status?: JobUserStatus | null;
+  match?: JobMatch | null;
 };
 
 export type JobUserStatus = {

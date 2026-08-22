@@ -4,7 +4,7 @@ import { StatusPill } from "../components/StatusPill";
 import { useToast } from "../components/Toast";
 import { api } from "../lib/api";
 import { formatDate } from "../lib/format";
-import type { Job, JobDetail } from "../types";
+import type { Job, JobDetail, JobMatch } from "../types";
 
 const EDUCATION_LEVELS = ["博士", "硕士", "本科", "大专"];
 const JOB_STATUS_OPTIONS = [
@@ -15,7 +15,41 @@ const JOB_STATUS_OPTIONS = [
   { value: "archived", label: "归档" }
 ];
 
-export function JobsPage() {
+export type MatchLabel =
+  | { kind: "none" }
+  | { kind: "blocking" }
+  | { kind: "ok"; text: string; percent: number };
+
+export function computeMatchLabel(match: JobMatch | null | undefined): MatchLabel {
+  if (!match) return { kind: "none" };
+  if (match.blocking_gap) return { kind: "blocking" };
+  return {
+    kind: "ok",
+    text: `满足 ${match.met}/${match.total} 项硬性要求`,
+    percent: match.degree_percent,
+  };
+}
+
+export function freshnessTag(
+  postedAt: string | null | undefined,
+  fetchedAt: string | null | undefined,
+  now: Date = new Date()
+): "" | "新" | "今日" {
+  const ts = postedAt ?? fetchedAt;
+  if (!ts) return "";
+  const postDate = new Date(ts);
+  const ageMs = now.getTime() - postDate.getTime();
+  if (ageMs < 0) return "";
+  const ageHours = ageMs / (1000 * 60 * 60);
+  if (ageHours <= 24) return "新";
+  const postDay = new Date(postDate.getFullYear(), postDate.getMonth(), postDate.getDate());
+  const nowDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const dayDiff = Math.round((nowDay.getTime() - postDay.getTime()) / (1000 * 60 * 60 * 24));
+  if (dayDiff <= 1) return "今日";
+  return "";
+}
+
+export function JobsPage({ onNavigate }: { onNavigate: (page: string) => void }) {
   const PAGE_SIZE = 50;
   const toast = useToast();
   const [keyword, setKeyword] = useState("");
@@ -178,6 +212,7 @@ export function JobsPage() {
               <th>机构</th>
               <th>类别</th>
               <th>学历</th>
+              <th>匹配度</th>
               <th>状态</th>
               <th>标签</th>
             </tr>
@@ -185,17 +220,44 @@ export function JobsPage() {
           <tbody>
             {jobs.length === 0 ? (
               <tr>
-                <td colSpan={6} className="loading-line">
+                <td colSpan={7} className="loading-line">
                   {loading ? "加载中…" : "未找到匹配岗位"}
                 </td>
               </tr>
             ) : (
-              jobs.map((job) => (
+              jobs.map((job) => {
+                const freshTag = freshnessTag(job.posted_at, job.fetched_at);
+                const matchLabel = computeMatchLabel(job.match);
+                return (
                 <tr key={job.id} className={detail?.id === job.id ? "active-row" : ""} onClick={() => void selectJob(job)}>
-                  <td><strong>{job.title}</strong></td>
+                  <td>
+                    <div className="job-title-cell">
+                      {freshTag && <span className={`freshness-badge freshness-${freshTag}`}>{freshTag}</span>}
+                      <strong>{job.title}</strong>
+                    </div>
+                  </td>
                   <td>{job.institution_name}</td>
                   <td>{job.job_category}</td>
                   <td>{job.education}</td>
+                  <td>
+                    {matchLabel.kind === "none" && (
+                      <button className="match-guide-link" onClick={(e) => { e.stopPropagation(); onNavigate("profile"); }}>
+                        请完善档案以查看匹配度
+                      </button>
+                    )}
+                    {matchLabel.kind === "blocking" && (
+                      <div className="match-cell">
+                        <span className="match-badge blocking">硬性不符</span>
+                        <div className="match-bar-track"><span className="match-bar-fill" style={{ width: "0%" }} /></div>
+                      </div>
+                    )}
+                    {matchLabel.kind === "ok" && (
+                      <div className="match-cell">
+                        <div className="match-bar-track"><span className="match-bar-fill" style={{ width: `${matchLabel.percent}%` }} /></div>
+                        <span className="match-text">{matchLabel.text}</span>
+                      </div>
+                    )}
+                  </td>
                   <td>{job.user_status ? <StatusPill value={job.user_status.status} /> : <span className="subtle">未评估</span>}</td>
                   <td>
                     <div className="tag-row">
@@ -203,7 +265,8 @@ export function JobsPage() {
                     </div>
                   </td>
                 </tr>
-              ))
+                );
+              })
             )}
           </tbody>
         </table>

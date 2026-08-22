@@ -735,6 +735,91 @@ textarea {
   white-space: nowrap;
 }
 
+.job-title-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.freshness-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 18px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.freshness-新 {
+  background: var(--green-soft);
+  color: var(--green);
+}
+
+.freshness-今日 {
+  background: var(--blue-soft);
+  color: var(--blue);
+}
+
+.match-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 120px;
+}
+
+.match-bar-track {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--line);
+  overflow: hidden;
+}
+
+.match-bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: linear-gradient(90deg, var(--green), var(--blue));
+  transition: width 0.3s ease;
+}
+
+.match-text {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.match-badge.blocking {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  border-radius: 4px;
+  background: var(--red-soft);
+  color: var(--red);
+  padding: 0 7px;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.match-guide-link {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.match-guide-link:hover {
+  color: var(--blue);
+}
+
 pre {
   white-space: pre-wrap;
   word-break: break-word;
