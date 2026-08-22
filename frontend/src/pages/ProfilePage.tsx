@@ -4,6 +4,7 @@ import { useToast } from "../components/Toast";
 import { api } from "../lib/api";
 import { demoProfile, emptyProfile } from "../lib/defaultProfile";
 import { mergeImportSelection } from "../lib/importMerge";
+import { formatDeleteWarning, formatOverlapWarning, shouldShowDeleteWarning, shouldShowOverlapWarning } from "../lib/profileChecks";
 import type { Profile, ProfileImportResult } from "../types";
 
 type Field = {
@@ -203,6 +204,8 @@ export function ProfilePage() {
   const [previewBasics, setPreviewBasics] = useState<Record<string, string>>({});
   const [importing, setImporting] = useState(false);
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
+  const [deleteConfirm, setDeleteConfirm] = useState<{ config: CollectionConfig; index: number; count: number } | null>(null);
+  const [overlapConfirm, setOverlapConfirm] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const currentMode: "fresh_grad" | "experienced" = profile.mode ?? "experienced";
@@ -251,6 +254,19 @@ export function ProfilePage() {
   }
 
   async function save() {
+    try {
+      const result = await api.checkOverlap(profile);
+      if (shouldShowOverlapWarning(result)) {
+        setOverlapConfirm(true);
+        return;
+      }
+    } catch {
+      // If the overlap check fails, proceed with save directly
+    }
+    await doSave();
+  }
+
+  async function doSave() {
     try {
       await api.saveProfile(profile);
       setSaved(true);
@@ -334,7 +350,27 @@ export function ProfilePage() {
     }));
   }
 
-  function removeItem(config: CollectionConfig, index: number) {
+  async function removeItem(config: CollectionConfig, index: number) {
+    const items = profile[config.key] as Array<Record<string, unknown>>;
+    const item = items[index];
+    const itemId = String(item?.id ?? "");
+    if (!itemId) {
+      doRemoveItem(config, index);
+      return;
+    }
+    try {
+      const result = await api.checkFieldReferences(itemId);
+      if (shouldShowDeleteWarning(result)) {
+        setDeleteConfirm({ config, index, count: result.count });
+        return;
+      }
+    } catch {
+      // If the reference check fails, proceed with delete
+    }
+    doRemoveItem(config, index);
+  }
+
+  function doRemoveItem(config: CollectionConfig, index: number) {
     setProfile((current) => ({
       ...current,
       [config.key]: (current[config.key] as Array<Record<string, unknown>>).filter((_, itemIndex) => itemIndex !== index)
@@ -589,6 +625,60 @@ export function ProfilePage() {
           </section>
         );
       })}
+
+      {deleteConfirm && (
+        <div className="dialog-overlay" onClick={() => setDeleteConfirm(null)}>
+          <div className="dialog small" onClick={(e) => e.stopPropagation()}>
+            <div className="dialog-header">
+              <h2>确认删除</h2>
+            </div>
+            <div className="dialog-body">
+              <p className="subtle">{formatDeleteWarning(deleteConfirm.count)}</p>
+            </div>
+            <div className="dialog-actions">
+              <button className="text-button" onClick={() => setDeleteConfirm(null)}>
+                取消
+              </button>
+              <button
+                className="primary-button"
+                onClick={() => {
+                  doRemoveItem(deleteConfirm.config, deleteConfirm.index);
+                  setDeleteConfirm(null);
+                }}
+              >
+                确认删除
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {overlapConfirm && (
+        <div className="dialog-overlay" onClick={() => setOverlapConfirm(false)}>
+          <div className="dialog small" onClick={(e) => e.stopPropagation()}>
+            <div className="dialog-header">
+              <h2>时间重叠提示</h2>
+            </div>
+            <div className="dialog-body">
+              <p className="subtle">{formatOverlapWarning()}</p>
+            </div>
+            <div className="dialog-actions">
+              <button className="text-button" onClick={() => setOverlapConfirm(false)}>
+                取消
+              </button>
+              <button
+                className="primary-button"
+                onClick={() => {
+                  setOverlapConfirm(false);
+                  void doSave();
+                }}
+              >
+                继续保存
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

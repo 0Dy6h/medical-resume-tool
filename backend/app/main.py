@@ -68,12 +68,14 @@ from app.services.repositories import (
     list_jobs,
     list_subscriptions,
     mark_subscription_read,
+    list_resume_drafts_by_user,
     save_profile,
     scan_subscriptions,
     update_resume_draft_sections,
     upsert_job_status,
     create_resume_draft as persist_resume_draft,
 )
+from app.services.profile_checks import check_profile_overlaps, count_field_references
 from app.services.resume import PROFILE_COLLECTIONS, analyze_job_match, attach_job_matches, generate_resume_draft
 from app.services.scheduler import SubscriptionScheduler
 
@@ -309,6 +311,22 @@ def create_app(database_url: str | None = None) -> FastAPI:
     ) -> dict:
         profile = payload.to_profile()
         return save_profile(engine, user["id"], profile)
+
+    @app.get("/api/profile/field-references")
+    def field_references(
+        field_id: str,
+        engine: Annotated[DatabaseEngine, Depends(get_engine)],
+        user: Annotated[dict, Depends(get_current_user)],
+    ) -> dict:
+        drafts = list_resume_drafts_by_user(engine, user["id"])
+        return count_field_references(drafts, field_id)
+
+    @app.post("/api/profile/check-overlap")
+    def check_overlap(
+        payload: ProfilePayload,
+        user: Annotated[dict, Depends(get_current_user)],
+    ) -> dict:
+        return check_profile_overlaps(payload.to_profile().model_dump())
 
     @app.post("/api/profile/import", response_model=ProfileImportOut)
     async def import_profile(

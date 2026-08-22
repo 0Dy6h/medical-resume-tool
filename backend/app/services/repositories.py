@@ -458,6 +458,21 @@ def update_resume_draft_sections(engine: DatabaseEngine, user_id: int, draft_id:
     return get_resume_draft(engine, user_id, draft_id)
 
 
+def list_resume_drafts_by_user(engine: DatabaseEngine, user_id: int) -> list[dict[str, Any]]:
+    with connect(engine) as conn:
+        rows = conn.execute(
+            "SELECT * FROM resume_drafts WHERE user_id = ? ORDER BY id",
+            (user_id,),
+        ).fetchall()
+    items = rows_to_dicts(rows)
+    for item in items:
+        item["profile_id"] = str(item["user_id"])
+        item["sections"] = from_json(item["sections"], [])
+        item["evidence"] = from_json(item["evidence"], [])
+        item["gaps"] = from_json(item["gaps"], [])
+    return items
+
+
 def save_report(engine: DatabaseEngine, title: str, markdown: str, html: str, filters: dict[str, Any]) -> dict[str, Any]:
     created = now_iso()
     with connect(engine) as conn:

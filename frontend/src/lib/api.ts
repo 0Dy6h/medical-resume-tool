@@ -12,6 +12,10 @@ import type {
   JobUserStatus,
   Subscription
 } from "../types";
+import type {
+  FieldReferenceResult,
+  OverlapCheckResult
+} from "./profileChecks";
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "";
 const TOKEN_KEY = "auth_token";
@@ -127,6 +131,15 @@ export const api = {
   saveProfile: (profile: Profile) =>
     request<Profile>("/api/profile", {
       method: "PUT",
+      body: JSON.stringify(profile)
+    }),
+  checkFieldReferences: (fieldId: string) =>
+    request<FieldReferenceResult>(
+      `/api/profile/field-references?field_id=${encodeURIComponent(fieldId)}`
+    ),
+  checkOverlap: (profile: Profile) =>
+    request<OverlapCheckResult>("/api/profile/check-overlap", {
+      method: "POST",
       body: JSON.stringify(profile)
     }),
   importProfile: async (file: File) => {
