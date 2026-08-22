@@ -329,20 +329,35 @@ def create_app(database_url: str | None = None) -> FastAPI:
         user: Annotated[dict, Depends(get_current_user)],
         format: Annotated[ExportFormat, Query()] = "docx",
         mode: Annotated[ExportMode, Query()] = "application",
+        override: Annotated[bool, Query()] = False,
     ) -> Response:
         try:
             draft = get_resume_draft(engine, user["id"], draft_id)
         except KeyError:
             raise HTTPException(status_code=404, detail="简历草稿不存在") from None
-        export_draft = _draft_for_export(draft, mode)
+
+        # 409: unreviewed draft — blocked unless the caller passes override.
+        if _compute_draft_status(draft) != "reviewed" and not override:
+            items = [item for section in draft.get("sections", []) for item in section.get("items", [])]
+            pending = sum(1 for item in items if item.get("decision") not in ("adopt", "edit", "remove"))
+            raise HTTPException(status_code=409, detail=f"草稿尚未审阅完成，还有 {pending} 项待确认")
+
+        export_draft = _draft_for_export(draft)
+
+        # 422: empty content — enforced regardless of override.
+        export_items = [item for section in export_draft["sections"] for item in section.get("items", [])]
+        if not export_items:
+            raise HTTPException(status_code=422, detail="导出内容为空，请至少保留一项内容后再导出")
+
+        include_appendix = mode == "diagnostic"
         if format == "docx":
             return Response(
-                content=export_docx(export_draft),
+                content=export_docx(export_draft, include_appendix=include_appendix),
                 media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                 headers={"Content-Disposition": f'attachment; filename="resume-{draft_id}.docx"'},
             )
         return Response(
-            content=export_pdf(export_draft),
+            content=export_pdf(export_draft, include_appendix=include_appendix),
             media_type="application/pdf",
             headers={"Content-Disposition": f'attachment; filename="resume-{draft_id}.pdf"'},
         )
@@ -403,24 +418,22 @@ def _with_computed_status(draft: dict) -> dict:
     return {**draft, "status": _compute_draft_status(draft)}
 
 
-def _draft_for_export(draft: dict, mode: ExportMode) -> dict:
+def _draft_for_export(draft: dict) -> dict:
+    """Strip removed items and the gaps paragraph from a draft for export.
+
+    The gaps paragraph is always removed: in application mode it is simply
+    omitted, and in diagnostic mode it is replaced by the match-analysis
+    appendix (added by the exporter when *include_appendix* is True).
+    """
     sections = [
         {
             **section,
             "items": [item for item in section.get("items", []) if item.get("decision") != "remove"],
         }
         for section in draft.get("sections", [])
+        if section.get("id") != "gaps" and section.get("title") != "投递前需补充确认"
     ]
-    if mode == "diagnostic":
-        return {**draft, "sections": sections}
-    return {
-        **draft,
-        "sections": [
-            section
-            for section in sections
-            if section.get("id") != "gaps" and section.get("title") != "投递前需补充确认"
-        ],
-    }
+    return {**draft, "sections": sections}
 
 
 app = create_app()

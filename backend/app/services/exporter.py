@@ -71,15 +71,63 @@ def _apply_cjk_default_font(document: Document) -> None:
         pass
 
 
-def export_docx(draft: dict[str, Any]) -> bytes:
+def _build_appendix_sections(draft: dict[str, Any]) -> list[dict[str, Any]]:
+    """Build match-analysis appendix sections from evidence and gaps.
+
+    Replaces the gaps paragraph in diagnostic mode with a structured
+    ✅已满足 / ⚠️未满足 breakdown that carries evidence and suggestions.
+    """
+    satisfied_items: list[dict[str, Any]] = []
+    for ev in draft.get("evidence", []):
+        req = str(ev.get("requirement", "")).strip()
+        label = str(ev.get("source_label", "")).strip()
+        source = str(ev.get("source_text", "")).strip()
+        strength = str(ev.get("evidence_strength", "")).strip()
+        parts = [req]
+        detail = "：".join(p for p in (label, source) if p)
+        if detail:
+            parts.append(f"证据：{detail}")
+        if strength:
+            parts.append(f"强度：{strength}")
+        satisfied_items.append({"text": " — ".join(parts)})
+
+    unmet_items: list[dict[str, Any]] = []
+    for gap in draft.get("gaps", []):
+        req = str(gap.get("requirement", "")).strip()
+        msg = str(gap.get("message", "")).strip()
+        parts = [req]
+        if msg:
+            parts.append(f"建议：{msg}")
+        if gap.get("blocking"):
+            parts.append("（硬性条件不满足）")
+        unmet_items.append({"text": " — ".join(parts)})
+
+    sections: list[dict[str, Any]] = [{"id": "appendix", "title": "匹配分析附录", "items": []}]
+    if satisfied_items:
+        sections.append({"id": "appendix-satisfied", "title": "已满足", "items": satisfied_items})
+    if unmet_items:
+        sections.append({"id": "appendix-unmet", "title": "未满足", "items": unmet_items})
+    return sections
+
+
+def _appendix_body_sections(draft: dict[str, Any], body_sections: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return body sections with the match-analysis appendix appended."""
+    return body_sections + _build_appendix_sections(draft)
+
+
+def export_docx(draft: dict[str, Any], include_appendix: bool = False) -> bytes:
     """Render the resume draft as a real Word document via python-docx.
 
     The applicant's name + contact line lead the document (resume header), then
-    each section renders as a heading with bulleted items.
+    each section renders as a heading with bulleted items.  When
+    *include_appendix* is True a match-analysis appendix (✅已满足/⚠️未满足
+    with evidence and suggestions) replaces the plain gaps paragraph.
     """
     document = Document()
     _apply_cjk_default_font(document)
     identity, body_sections = _split_identity(draft)
+    if include_appendix:
+        body_sections = _appendix_body_sections(draft, body_sections)
 
     if identity:
         name, contact_lines = _identity_lines(identity)
@@ -107,8 +155,12 @@ def export_docx(draft: dict[str, Any]) -> bytes:
     return buffer.getvalue()
 
 
-def export_pdf(draft: dict[str, Any]) -> bytes:
-    """Export resume draft to PDF with CJK support using fpdf2."""
+def export_pdf(draft: dict[str, Any], include_appendix: bool = False) -> bytes:
+    """Export resume draft to PDF with CJK support using fpdf2.
+
+    When *include_appendix* is True a match-analysis appendix is appended
+    after the body sections, mirroring the DOCX diagnostic output.
+    """
     pdf = FPDF()
     pdf.add_page()
 
@@ -123,6 +175,8 @@ def export_pdf(draft: dict[str, Any]) -> bytes:
     pdf.set_font("cjk", size=12)
 
     identity, body_sections = _split_identity(draft)
+    if include_appendix:
+        body_sections = _appendix_body_sections(draft, body_sections)
 
     # Header: applicant name + contact, or the draft title as a fallback.
     if identity:

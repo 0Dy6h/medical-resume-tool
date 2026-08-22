@@ -159,8 +159,14 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ title, filters: {} })
     }),
-  exportResume: async (draftId: number, format: "docx" | "pdf", mode: "application" | "diagnostic" = "application") => {
-    const response = await fetch(`${API_BASE}/api/resume-drafts/${draftId}/export?format=${format}&mode=${mode}`, {
+  exportResume: async (
+    draftId: number,
+    format: "docx" | "pdf",
+    mode: "application" | "diagnostic" = "application",
+    override = false,
+  ) => {
+    const params = new URLSearchParams({ format, mode, override: String(override) });
+    const response = await fetch(`${API_BASE}/api/resume-drafts/${draftId}/export?${params}`, {
       method: "POST",
       headers: authHeaders()
     });

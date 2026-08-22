@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { flattenReviewItems, computeDraftStatus, reviewTone, filterExportSections } from "./ResumePage";
+import { flattenReviewItems, computeDraftStatus, reviewTone, filterExportSections, exportBlock } from "./ResumePage";
 import type { ResumeSection } from "../types";
 
 const sampleSections: ResumeSection[] = [
@@ -151,5 +151,37 @@ describe("remove filtering for export", () => {
     const filtered = filterExportSections(withDecisions);
     expect(filtered[0].items.length).toBe(2);
     expect(filtered[1].items.length).toBe(2);
+  });
+});
+
+describe("exportBlock — frontend export guard", () => {
+  it("returns proceed when all items have decisions", () => {
+    const reviewed = sampleSections.map((s) => ({
+      ...s,
+      items: s.items.map((i) => ({ ...i, decision: "adopt" as const })),
+    }));
+    expect(exportBlock(reviewed)).toEqual({ kind: "proceed" });
+  });
+
+  it("returns confirm with pending count when no items have decisions", () => {
+    const result = exportBlock(sampleSections);
+    expect(result.kind).toBe("confirm");
+    if (result.kind === "confirm") {
+      expect(result.pending).toBe(5);
+    }
+  });
+
+  it("returns confirm with correct pending count when some items have decisions", () => {
+    const partial = sampleSections.map((s, si) => ({
+      ...s,
+      items: s.items.map((i, ii) =>
+        si === 0 && ii === 0 ? { ...i, decision: "adopt" as const } : i,
+      ),
+    }));
+    const result = exportBlock(partial);
+    expect(result.kind).toBe("confirm");
+    if (result.kind === "confirm") {
+      expect(result.pending).toBe(4);
+    }
   });
 });

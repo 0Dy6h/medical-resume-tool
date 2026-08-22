@@ -69,6 +69,19 @@ export function filterExportSections(sections: ResumeSection[]): ResumeSection[]
   }));
 }
 
+export type ExportGuardResult =
+  | { kind: "proceed" }
+  | { kind: "confirm"; pending: number };
+
+export function exportBlock(sections: ResumeSection[]): ExportGuardResult {
+  if (computeDraftStatus(sections) === "reviewed") return { kind: "proceed" };
+  const items = sections.flatMap((s) => s.items);
+  const pending = items.filter(
+    (item) => item.decision !== "adopt" && item.decision !== "edit" && item.decision !== "remove",
+  ).length;
+  return { kind: "confirm", pending };
+}
+
 // ── Review card colours (matching PRD 4.4 prototype) ────────────────
 
 const TONE_STYLES: Record<"green" | "yellow" | "red", { bg: string; border: string; color: string; label: string }> = {
@@ -93,6 +106,7 @@ export function ResumePage() {
   const [loading, setLoading] = useState(false);
   const [saved, setSaved] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [exportConfirm, setExportConfirm] = useState<{ format: "docx" | "pdf"; mode: "application" | "diagnostic"; pending: number } | null>(null);
   const [reviewMode, setReviewMode] = useState(false);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [editing, setEditing] = useState(false);
@@ -137,10 +151,21 @@ export function ResumePage() {
 
   async function exportDraft(format: "docx" | "pdf", mode: "application" | "diagnostic" = "application") {
     if (!draft) return;
+    const guard = exportBlock(draft.sections);
+    if (guard.kind === "confirm") {
+      setExportConfirm({ format, mode, pending: guard.pending });
+      return;
+    }
+    await doExport(format, mode, false);
+  }
+
+  async function doExport(format: "docx" | "pdf", mode: "application" | "diagnostic", override: boolean) {
+    if (!draft) return;
     setExporting(true);
+    setExportConfirm(null);
     try {
       await saveDraft();
-      const blob = await api.exportResume(draft.id, format, mode);
+      const blob = await api.exportResume(draft.id, format, mode, override);
       downloadBlob(blob, `resume-${draft.id}-${mode}.${format}`);
       toast.success(`已导出 ${format.toUpperCase()}`);
     } catch (error) {
@@ -498,6 +523,32 @@ export function ResumePage() {
               )}
             </div>
           </aside>
+        </div>
+      )}
+
+      {exportConfirm && (
+        <div className="modal-overlay" style={{
+          position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)",
+          display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000,
+        }}>
+          <div className="panel" style={{ maxWidth: 420, padding: "1.5rem" }}>
+            <h2 style={{ marginBottom: "0.5rem" }}>草稿尚未审阅完成</h2>
+            <p className="subtle" style={{ marginBottom: "1rem" }}>
+              还有 {exportConfirm.pending} 项待确认。未审阅的草稿可能包含不完整或待修改的内容，是否继续导出？
+            </p>
+            <div className="button-row" style={{ justifyContent: "flex-end" }}>
+              <button className="icon-text-button" onClick={() => setExportConfirm(null)}>
+                返回审阅
+              </button>
+              <button
+                className="primary-button"
+                onClick={() => void doExport(exportConfirm.format, exportConfirm.mode, true)}
+                disabled={exporting}
+              >
+                {exporting ? "导出中..." : "继续导出"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

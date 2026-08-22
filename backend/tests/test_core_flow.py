@@ -574,14 +574,14 @@ def test_profile_resume_draft_truth_constraints_and_exports(tmp_path):
     assert all(item["evidence_strength"] in {"strong", "partial", "weak"} for item in draft_payload["evidence"])
     assert all("未在你的履历中找到对应证据" in gap["message"] for gap in draft_payload["gaps"])
 
-    docx = client.post(f"/api/resume-drafts/{draft_payload['id']}/export", params={"format": "docx"}, headers=auth)
+    docx = client.post(f"/api/resume-drafts/{draft_payload['id']}/export", params={"format": "docx", "override": True}, headers=auth)
     assert docx.status_code == 200
     assert docx.headers["content-type"].startswith(
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     )
     assert io.BytesIO(docx.content).getbuffer().nbytes > 1000
 
-    pdf = client.post(f"/api/resume-drafts/{draft_payload['id']}/export", params={"format": "pdf"}, headers=auth)
+    pdf = client.post(f"/api/resume-drafts/{draft_payload['id']}/export", params={"format": "pdf", "override": True}, headers=auth)
     assert pdf.status_code == 200
     assert pdf.headers["content-type"].startswith("application/pdf")
     assert pdf.content.startswith(b"%PDF")
@@ -621,7 +621,7 @@ def test_resume_export_includes_identity_header_and_basics_persist(tmp_path):
     assert draft["sections"][0]["items"][0]["text"] == "林晓"
 
     docx = client.post(
-        f"/api/resume-drafts/{draft['id']}/export", params={"format": "docx"}, headers=auth
+        f"/api/resume-drafts/{draft['id']}/export", params={"format": "docx", "override": True}, headers=auth
     )
     assert docx.status_code == 200
     assert docx.headers["content-type"].startswith(
@@ -630,7 +630,7 @@ def test_resume_export_includes_identity_header_and_basics_persist(tmp_path):
     assert "林晓" in docx_document_xml(docx.content)
 
     pdf = client.post(
-        f"/api/resume-drafts/{draft['id']}/export", params={"format": "pdf"}, headers=auth
+        f"/api/resume-drafts/{draft['id']}/export", params={"format": "pdf", "override": True}, headers=auth
     )
     assert pdf.status_code == 200
     assert pdf.content.startswith(b"%PDF")
@@ -710,17 +710,17 @@ def test_resume_export_modes_keep_application_copy_free_of_gap_diagnostics(tmp_p
 
     application = client.post(
         f"/api/resume-drafts/{draft['id']}/export",
-        params={"format": "docx", "mode": "application"},
+        params={"format": "docx", "mode": "application", "override": True},
         headers=auth,
     )
     diagnostic = client.post(
         f"/api/resume-drafts/{draft['id']}/export",
-        params={"format": "docx", "mode": "diagnostic"},
+        params={"format": "docx", "mode": "diagnostic", "override": True},
         headers=auth,
     )
     application_pdf = client.post(
         f"/api/resume-drafts/{draft['id']}/export",
-        params={"format": "pdf", "mode": "application"},
+        params={"format": "pdf", "mode": "application", "override": True},
         headers=auth,
     )
 
@@ -729,10 +729,14 @@ def test_resume_export_modes_keep_application_copy_free_of_gap_diagnostics(tmp_p
     assert application_pdf.status_code == 200
     application_xml = docx_document_xml(application.content)
     diagnostic_xml = docx_document_xml(diagnostic.content)
+    # Both modes strip the gaps paragraph; diagnostic replaces it with an appendix.
     assert "投递前需补充确认" not in application_xml
     assert "未在你的履历中找到对应证据" not in application_xml
-    assert "投递前需补充确认" in diagnostic_xml
+    assert "投递前需补充确认" not in diagnostic_xml
+    assert "匹配分析附录" in diagnostic_xml
+    assert "未满足" in diagnostic_xml
     assert "未在你的履历中找到对应证据" in diagnostic_xml
+    assert "匹配分析附录" not in application_xml
     assert b"\xe6\x8a\x95\xe9\x80\x92\xe5\x89\x8d\xe9\x9c\x80\xe8\xa1\xa5\xe5\x85\x85\xe7\xa1\xae\xe8\xae\xa4" not in application_pdf.content
     assert b"\xe6\x9c\xaa\xe5\x9c\xa8\xe4\xbd\xa0\xe7\x9a\x84\xe5\xb1\xa5\xe5\x8e\x86\xe4\xb8\xad\xe6\x89\xbe\xe5\x88\xb0\xe5\xaf\xb9\xe5\xba\x94\xe8\xaf\x81\xe6\x8d\xae" not in application_pdf.content
 
@@ -838,7 +842,7 @@ def test_pdf_export_accepts_chinese_resume_content(tmp_path):
     client.put("/api/profile", json=profile_payload, headers=auth)
     draft = client.post("/api/resume-drafts", json={"job_id": job["id"]}, headers=auth).json()
 
-    pdf = client.post(f"/api/resume-drafts/{draft['id']}/export", params={"format": "pdf"}, headers=auth)
+    pdf = client.post(f"/api/resume-drafts/{draft['id']}/export", params={"format": "pdf", "override": True}, headers=auth)
 
     assert pdf.status_code == 200
     assert pdf.content.startswith(b"%PDF")
@@ -908,3 +912,124 @@ def test_resume_draft_decision_status_and_export_filtering(tmp_path):
     rechecked = client.get(f"/api/resume-drafts/{draft['id']}", headers=auth).json()
     assert rechecked["sections"][0]["items"][0]["decision"] == "remove"
     assert rechecked["sections"][0]["items"][0]["text"] == remove_text
+
+
+def test_export_unreviewed_draft_returns_409_with_pending_count(tmp_path):
+    """Unreviewed draft export is blocked with 409 carrying the pending count."""
+    client = make_client(tmp_path)
+    auth = auth_headers(client)
+    crawl_and_wait(client, [1])
+    job = client.get("/api/jobs", params={"keyword": "科研"}).json()["items"][0]
+    profile_payload = {
+        "basics": {"name": "测试"},
+        "skills": [{"id": "skill-1", "name": "SPSS"}],
+    }
+    client.put("/api/profile", json=profile_payload, headers=auth)
+    draft = client.post("/api/resume-drafts", json={"job_id": job["id"]}, headers=auth).json()
+    assert draft["status"] == "draft"
+
+    resp = client.post(
+        f"/api/resume-drafts/{draft['id']}/export",
+        params={"format": "docx"},
+        headers=auth,
+    )
+    assert resp.status_code == 409
+    detail = resp.json()["detail"]
+    assert "尚未审阅" in detail
+    assert "项待确认" in detail
+
+
+def test_export_unreviewed_draft_succeeds_with_override(tmp_path):
+    """override=true bypasses the 409 review gate."""
+    client = make_client(tmp_path)
+    auth = auth_headers(client)
+    crawl_and_wait(client, [1])
+    job = client.get("/api/jobs", params={"keyword": "科研"}).json()["items"][0]
+    profile_payload = {
+        "basics": {"name": "测试"},
+        "skills": [{"id": "skill-1", "name": "SPSS"}],
+    }
+    client.put("/api/profile", json=profile_payload, headers=auth)
+    draft = client.post("/api/resume-drafts", json={"job_id": job["id"]}, headers=auth).json()
+
+    resp = client.post(
+        f"/api/resume-drafts/{draft['id']}/export",
+        params={"format": "docx", "override": True},
+        headers=auth,
+    )
+    assert resp.status_code == 200
+
+
+def test_export_empty_draft_returns_422(tmp_path):
+    """All items removed → 422 regardless of override."""
+    client = make_client(tmp_path)
+    auth = auth_headers(client)
+    crawl_and_wait(client, [1])
+    job = client.get("/api/jobs", params={"keyword": "科研"}).json()["items"][0]
+    profile_payload = {
+        "basics": {"name": "空导出"},
+        "skills": [{"id": "skill-1", "name": "SPSS"}],
+    }
+    client.put("/api/profile", json=profile_payload, headers=auth)
+    draft = client.post("/api/resume-drafts", json={"job_id": job["id"]}, headers=auth).json()
+
+    # Mark every item as "remove" → status="reviewed" but no content survives.
+    sections = draft["sections"]
+    for section in sections:
+        for item in section["items"]:
+            item["decision"] = "remove"
+    client.put(f"/api/resume-drafts/{draft['id']}", json={"sections": sections}, headers=auth)
+
+    resp = client.post(
+        f"/api/resume-drafts/{draft['id']}/export",
+        params={"format": "docx", "override": True},
+        headers=auth,
+    )
+    assert resp.status_code == 422
+    assert "为空" in resp.json()["detail"]
+
+
+def test_diagnostic_export_appendix_contains_evidence_and_gaps(tmp_path):
+    """Diagnostic mode appends a match-analysis appendix with evidence and gaps."""
+    client = make_client(tmp_path)
+    auth = auth_headers(client)
+    crawl_and_wait(client, [1])
+    job = client.get("/api/jobs", params={"keyword": "科研"}).json()["items"][0]
+    profile_payload = {
+        "basics": {"name": "附录测试"},
+        "education": [{"id": "edu-1", "school": "复旦大学", "degree": "硕士", "major": "临床医学"}],
+        "skills": [{"id": "skill-1", "name": "SPSS"}],
+    }
+    client.put("/api/profile", json=profile_payload, headers=auth)
+    draft = client.post("/api/resume-drafts", json={"job_id": job["id"]}, headers=auth).json()
+
+    # Set all decisions so export succeeds without override.
+    sections = draft["sections"]
+    for section in sections:
+        for item in section["items"]:
+            item["decision"] = "adopt"
+    client.put(f"/api/resume-drafts/{draft['id']}", json={"sections": sections}, headers=auth)
+
+    diag = client.post(
+        f"/api/resume-drafts/{draft['id']}/export",
+        params={"format": "docx", "mode": "diagnostic"},
+        headers=auth,
+    )
+    app = client.post(
+        f"/api/resume-drafts/{draft['id']}/export",
+        params={"format": "docx", "mode": "application"},
+        headers=auth,
+    )
+    assert diag.status_code == 200
+    assert app.status_code == 200
+
+    diag_xml = docx_document_xml(diag.content)
+    app_xml = docx_document_xml(app.content)
+
+    assert "匹配分析附录" in diag_xml
+    assert "匹配分析附录" not in app_xml
+
+    if draft["evidence"]:
+        assert "已满足" in diag_xml
+    if draft["gaps"]:
+        assert "未满足" in diag_xml
