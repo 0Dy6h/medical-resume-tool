@@ -22,5 +22,10 @@ class Config:
     # 分析配置
     low_confidence_threshold: float = 0.65
 
+    # 订阅推送调度配置
+    subscription_scan_enabled: bool = os.getenv("SUBSCRIPTION_SCAN_ENABLED", "true").lower() == "true"
+    subscription_scan_hour: int = int(os.getenv("SUBSCRIPTION_SCAN_HOUR", "9"))
+    subscription_scan_minute: int = int(os.getenv("SUBSCRIPTION_SCAN_MINUTE", "0"))
+
 
 config = Config()

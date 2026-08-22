@@ -170,19 +170,21 @@ def init_db(engine: DatabaseEngine) -> None:
             );
 
             CREATE TABLE IF NOT EXISTS subscriptions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER NOT NULL REFERENCES users(id),
-                name TEXT NOT NULL,
-                keyword TEXT NOT NULL,
-                institution_ids TEXT NOT NULL,
-                last_checked_at TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    name TEXT NOT NULL,
+    keyword TEXT NOT NULL,
+    institution_ids TEXT NOT NULL,
+    last_checked_at TEXT NOT NULL,
+    last_pushed_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+    );
 
             CREATE INDEX IF NOT EXISTS idx_subscriptions_user ON subscriptions(user_id);
             """
         )
+        _migrate_subscriptions_add_last_pushed_at(conn)
         _migrate_user_scoped_tables(conn)
         count = conn.execute("SELECT COUNT(*) AS count FROM institutions").fetchone()["count"]
         if count == 0:
@@ -199,6 +201,12 @@ def init_db(engine: DatabaseEngine) -> None:
                 [{**item, "enabled": 1 if item["enabled"] else 0} for item in SEED_INSTITUTIONS],
             )
         conn.commit()
+
+
+def _migrate_subscriptions_add_last_pushed_at(conn: sqlite3.Connection) -> None:
+    cols = {row["name"] for row in conn.execute("PRAGMA table_info(subscriptions)").fetchall()}
+    if cols and "last_pushed_at" not in cols:
+        conn.execute("ALTER TABLE subscriptions ADD COLUMN last_pushed_at TEXT")
 
 
 def _table_columns(conn: sqlite3.Connection, table: str) -> set[str]:

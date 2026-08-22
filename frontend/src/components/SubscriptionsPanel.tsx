@@ -136,11 +136,11 @@ export function SubscriptionsPanel({
                 {subscriptionSubtitle(sub)}
               </p>
               {maintenanceCount > 0 && (
-                <p className="maintenance-note">
-                  <AlertTriangle size={12} />
-                  {maintenanceCount} 家机构维护中
-                </p>
-              )}
+              <p className="maintenance-note">
+                <AlertTriangle size={12} />
+                {maintenanceCount} 家机构维护中 · 暂停推送
+              </p>
+            )}
               <div className="subscription-card-actions">
                 <button
                   className="text-button"

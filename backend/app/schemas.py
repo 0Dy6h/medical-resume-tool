@@ -561,6 +561,13 @@ class SubscriptionOut(BaseModel):
     institution_statuses: list[SubscriptionInstitutionStatus]
     new_count: int
     last_checked_at: str
+    last_pushed_at: str | None = None
     is_empty_30d: bool
     warning: str | None = None
     created_at: str
+
+
+class SubscriptionScanOut(BaseModel):
+    """Result of a subscription scan."""
+    scanned: int
+    pushed: int

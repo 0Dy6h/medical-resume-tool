@@ -17,6 +17,7 @@ function makeSubscription(overrides: Partial<Subscription> = {}): Subscription {
     institution_statuses: [{ id: 1, name: "测试医院", is_maintenance: false }],
     new_count: 0,
     last_checked_at: "2026-08-20T10:00:00.000Z",
+    last_pushed_at: "2026-08-20T10:00:00.000Z",
     is_empty_30d: false,
     created_at: "2026-08-01T00:00:00.000Z",
     ...overrides
@@ -49,7 +50,7 @@ describe("formatLastPushed", () => {
   });
 
   it("handles null input gracefully", () => {
-    expect(formatLastPushed(null)).toBe("未检查");
+    expect(formatLastPushed(null)).toBe("未推送");
   });
 
   it("handles invalid date strings", () => {
@@ -104,12 +105,20 @@ describe("subscriptionSubtitle", () => {
     const sub = makeSubscription({
       new_count: 5,
       is_empty_30d: false,
-      last_checked_at: "2026-08-20T10:00:00.000Z"
+      last_pushed_at: "2026-08-20T10:00:00.000Z"
     });
-    const now = new Date("2026-08-20T10:15:00.000Z");
-    const result = subscriptionSubtitle({ ...sub });
+    const result = subscriptionSubtitle(sub);
     expect(result).toContain("5 条新职位");
     expect(result).toContain("上次推送");
+  });
+
+  it("shows 未推送 when last_pushed_at is null", () => {
+    const sub = makeSubscription({
+      new_count: 3,
+      last_pushed_at: null
+    });
+    const result = subscriptionSubtitle(sub);
+    expect(result).toContain("未推送");
   });
 });
 

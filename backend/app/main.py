@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import os
 import threading
+from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response, UploadFile
@@ -33,6 +35,7 @@ from app.schemas import (
     StructuredJDOut,
     SubscriptionCreate,
     SubscriptionOut,
+    SubscriptionScanOut,
 )
 from app.services.analytics import analytics_summary, generate_report
 from app.services.auth import hash_password, make_token, verify_password, verify_token
@@ -50,6 +53,7 @@ from app.services.repositories import (
     create_user,
     delete_job_status,
     delete_subscription,
+    filter_active_institution_ids,
     get_crawl_run,
     get_institutions_by_ids,
     get_institutions_status,
@@ -65,18 +69,40 @@ from app.services.repositories import (
     list_subscriptions,
     mark_subscription_read,
     save_profile,
+    scan_subscriptions,
     update_resume_draft_sections,
     upsert_job_status,
     create_resume_draft as persist_resume_draft,
 )
 from app.services.resume import PROFILE_COLLECTIONS, analyze_job_match, attach_job_matches, generate_resume_draft
+from app.services.scheduler import SubscriptionScheduler
 
 
 DEFAULT_DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./data/app.db")
 
 
 def create_app(database_url: str | None = None) -> FastAPI:
-    app = FastAPI(title="医疗岗位情报与真实简历定制工具", version="0.1.0")
+    from app.config import config
+
+    engine = create_engine(database_url or DEFAULT_DATABASE_URL)
+    init_db(engine)
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        scheduler = SubscriptionScheduler(
+            engine,
+            hour=config.subscription_scan_hour,
+            minute=config.subscription_scan_minute,
+            enabled=config.subscription_scan_enabled,
+        )
+        app.state.scheduler = scheduler
+        scheduler.start()
+        try:
+            yield
+        finally:
+            scheduler.stop()
+
+    app = FastAPI(title="医疗岗位情报与真实简历定制工具", version="0.1.0", lifespan=lifespan)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
@@ -84,9 +110,7 @@ def create_app(database_url: str | None = None) -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    engine = create_engine(database_url or DEFAULT_DATABASE_URL)
     app.state.engine = engine
-    init_db(engine)
 
     @app.get("/health")
     def health() -> dict[str, str]:
@@ -123,11 +147,16 @@ def create_app(database_url: str | None = None) -> FastAPI:
         if not institutions_to_crawl:
             raise HTTPException(status_code=404, detail="没有找到可抓取的机构")
         run_id = create_crawl_run(engine, [item["id"] for item in institutions_to_crawl])
-        thread = threading.Thread(
-            target=execute_crawl_run,
-            args=(engine, run_id, institutions_to_crawl, config.crawl_delay_seconds),
-            daemon=True,
-        )
+
+        def _crawl_then_scan() -> None:
+            try:
+                execute_crawl_run(
+                    engine, run_id, institutions_to_crawl, config.crawl_delay_seconds
+                )
+            finally:
+                scan_subscriptions(engine, datetime.now(timezone.utc))
+
+        thread = threading.Thread(target=_crawl_then_scan, daemon=True)
         thread.start()
         return get_crawl_run(engine, run_id)
 
@@ -388,20 +417,22 @@ def create_app(database_url: str | None = None) -> FastAPI:
     # ── Subscriptions (PRD 4.1) ────────────────────────────────────────
 
     def _enrich_subscription(sub: dict, engine: DatabaseEngine) -> dict:
-        """Attach computed fields: new_count, institution_statuses, is_empty_30d."""
+        """Attach computed fields: new_count, institution_statuses, is_empty_30d, last_pushed_at."""
         institution_ids = sub["institution_ids"]
-        new_count = count_new_jobs_for_subscription(
-            engine, sub["keyword"], institution_ids, sub["last_checked_at"]
-        )
         institution_statuses = get_institutions_status(engine, institution_ids)
+        active_ids = [s["id"] for s in institution_statuses if not s["is_maintenance"]]
+        new_count = count_new_jobs_for_subscription(
+            engine, sub["keyword"], active_ids, sub["last_checked_at"]
+        )
         is_empty_30d = not has_matching_jobs_last_30d(
-            engine, sub["keyword"], institution_ids
+            engine, sub["keyword"], active_ids
         )
         return {
             **sub,
             "new_count": new_count,
             "institution_statuses": institution_statuses,
             "is_empty_30d": is_empty_30d,
+            "last_pushed_at": sub.get("last_pushed_at"),
         }
 
     BROAD_KEYWORD_RATIO = 0.5  # >50% match ratio = broad keyword
@@ -483,6 +514,13 @@ def create_app(database_url: str | None = None) -> FastAPI:
         except KeyError:
             raise HTTPException(status_code=404, detail="订阅不存在") from None
         return _enrich_subscription(sub, engine)
+
+    @app.post("/api/subscriptions/scan", response_model=SubscriptionScanOut)
+    def scan_subscriptions_endpoint(
+        engine: Annotated[DatabaseEngine, Depends(get_engine)],
+        user: Annotated[dict, Depends(get_current_user)],
+    ) -> dict:
+        return scan_subscriptions(engine, datetime.now(timezone.utc), user_id=user["id"])
 
     return app
 

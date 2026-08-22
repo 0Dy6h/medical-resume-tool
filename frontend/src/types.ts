@@ -229,6 +229,7 @@ export type Subscription = {
   institution_statuses: SubscriptionInstitutionStatus[];
   new_count: number;
   last_checked_at: string;
+  last_pushed_at: string | null;
   is_empty_30d: boolean;
   warning?: string | null;
   created_at: string;

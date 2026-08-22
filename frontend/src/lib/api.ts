@@ -172,6 +172,8 @@ export const api = {
     request<void>(`/api/subscriptions/${id}`, { method: "DELETE" }),
   markSubscriptionRead: (id: number) =>
     request<Subscription>(`/api/subscriptions/${id}/mark-read`, { method: "POST" }),
+  scanSubscriptions: () =>
+    request<{ scanned: number; pushed: number }>("/api/subscriptions/scan", { method: "POST" }),
   exportResume: async (
     draftId: number,
     format: "docx" | "pdf",

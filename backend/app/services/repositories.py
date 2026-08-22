@@ -480,17 +480,17 @@ def create_subscription(
     keyword: str,
     institution_ids: list[int],
 ) -> dict[str, Any]:
-    """Create a subscription. last_checked_at is set to creation time."""
+    """Create a subscription. last_checked_at and last_pushed_at are set to creation time."""
     now = now_iso()
     with connect(engine) as conn:
         cur = conn.execute(
             """
             INSERT INTO subscriptions (
                 user_id, name, keyword, institution_ids,
-                last_checked_at, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                last_checked_at, last_pushed_at, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (user_id, name, keyword, to_json(institution_ids), now, now, now),
+            (user_id, name, keyword, to_json(institution_ids), now, now, now, now),
         )
         conn.commit()
         sub_id = int(cur.lastrowid)
@@ -673,3 +673,64 @@ def get_institutions_status(engine: DatabaseEngine, institution_ids: list[int]) 
             "is_maintenance": is_maintenance,
         })
     return result
+
+
+def filter_active_institution_ids(
+    engine: DatabaseEngine, institution_ids: list[int]
+) -> list[int]:
+    """Return only non-maintenance institution IDs from the given list."""
+    statuses = get_institutions_status(engine, institution_ids)
+    return [s["id"] for s in statuses if not s["is_maintenance"]]
+
+
+def list_all_subscriptions(engine: DatabaseEngine) -> list[dict[str, Any]]:
+    """List all subscriptions across all users (for scheduler scans)."""
+    with connect(engine) as conn:
+        rows = conn.execute("SELECT * FROM subscriptions ORDER BY id").fetchall()
+    items = [dict(row) for row in rows]
+    for item in items:
+        item["institution_ids"] = from_json(item["institution_ids"], [])
+    return items
+
+
+def scan_subscriptions(
+    engine: DatabaseEngine,
+    now: datetime,
+    user_id: int | None = None,
+) -> dict[str, Any]:
+    """Scan subscriptions and update last_pushed_at for those with new jobs since last push.
+
+    - Finds jobs fetched after last_pushed_at (falling back to last_checked_at) at
+      non-maintenance institutions matching the subscription keyword.
+    - If new jobs are found, advances last_pushed_at to *now*.
+    - Does NOT change last_checked_at or new_count (those are read-checkpoint concepts).
+
+    Returns a summary dict with scanned/pushed counts.
+    """
+    now_str = now.isoformat()
+    if user_id is not None:
+        subs = list_subscriptions(engine, user_id)
+    else:
+        subs = list_all_subscriptions(engine)
+
+    scanned = 0
+    pushed = 0
+    for sub in subs:
+        scanned += 1
+        institution_ids = sub["institution_ids"]
+        active_ids = filter_active_institution_ids(engine, institution_ids)
+        if not active_ids:
+            continue
+        checkpoint = sub.get("last_pushed_at") or sub["last_checked_at"]
+        count = count_new_jobs_for_subscription(
+            engine, sub["keyword"], active_ids, checkpoint
+        )
+        if count > 0:
+            with connect(engine) as conn:
+                conn.execute(
+                    "UPDATE subscriptions SET last_pushed_at = ?, updated_at = ? WHERE id = ?",
+                    (now_str, now_str, sub["id"]),
+                )
+                conn.commit()
+            pushed += 1
+    return {"scanned": scanned, "pushed": pushed}

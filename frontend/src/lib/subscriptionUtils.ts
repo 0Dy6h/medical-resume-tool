@@ -8,12 +8,12 @@ import type { Subscription } from "../types";
  * - Older: date string from formatDate
  */
 export function formatLastPushed(
-  lastCheckedAt: string | null | undefined,
+  lastPushedAt: string | null | undefined,
   now: Date = new Date()
 ): string {
-  if (!lastCheckedAt) return "未检查";
-  const date = new Date(lastCheckedAt);
-  if (Number.isNaN(date.getTime())) return lastCheckedAt;
+  if (!lastPushedAt) return "未推送";
+  const date = new Date(lastPushedAt);
+  if (Number.isNaN(date.getTime())) return lastPushedAt;
   const diffMs = now.getTime() - date.getTime();
   if (diffMs < 0) return "刚刚";
   const diffMinutes = Math.floor(diffMs / (1000 * 60));
@@ -61,7 +61,7 @@ export function subscriptionSubtitle(sub: Subscription): string {
   if (sub.is_empty_30d && sub.new_count === 0) {
     return "近 30 天无新职位";
   }
-  return `${sub.new_count} 条新职位 · 上次推送 ${formatLastPushed(sub.last_checked_at)}`;
+  return `${sub.new_count} 条新职位 · 上次推送 ${formatLastPushed(sub.last_pushed_at)}`;
 }
 
 /**

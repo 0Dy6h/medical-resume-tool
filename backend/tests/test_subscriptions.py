@@ -757,3 +757,381 @@ def test_broad_keyword_warning(tmp_path):
     )
     data2 = resp2.json()
     assert data2.get("warning") is None or data2.get("warning") == ""
+
+
+# ── Auto-push / scan (PRD 4.1) ───────────────────────────────────────
+
+
+def _backdate_subscription(engine, sub_id, *, days=2):
+    """Backdate both checkpoints so existing jobs appear 'new'."""
+    past = iso_days_ago(days)
+    with connect(engine) as conn:
+        conn.execute(
+            "UPDATE subscriptions SET last_checked_at = ?, last_pushed_at = ? WHERE id = ?",
+            (past, past, sub_id),
+        )
+        conn.commit()
+
+
+def test_scan_advances_push_time_keeps_new_count(tmp_path):
+    """Scan updates last_pushed_at but does not change new_count or last_checked_at."""
+    client = make_client(tmp_path)
+    user = register_user(client, "alice")
+    headers = auth_headers(user["token"])
+    engine = client.app.state.engine
+
+    seed_jobs(engine, [
+        {
+            "institution_id": 1,
+            "institution_name": "测试医院",
+            "institution_type": "医院",
+            "region": "北京",
+            "title": "内科主治医师",
+            "source_url": "https://example.com/scan1",
+            "source_text_hash": "scan1",
+            "raw_text": "内科主治医师招聘",
+            "parser_name": "test",
+            "job_category": "临床",
+            "confidence": 0.9,
+            "fetched_at": iso_days_ago(1),
+        },
+    ])
+
+    created = client.post(
+        "/api/subscriptions",
+        json={"name": "内科订阅", "keyword": "内科", "institution_ids": [1]},
+        headers=headers,
+    )
+    sub_id = created.json()["id"]
+    _backdate_subscription(engine, sub_id, days=2)
+
+    listed = client.get("/api/subscriptions", headers=headers)
+    before = listed.json()[0]
+    assert before["new_count"] == 1
+    old_pushed = before["last_pushed_at"]
+
+    resp = client.post("/api/subscriptions/scan", headers=headers)
+    assert resp.status_code == 200
+    assert resp.json()["pushed"] >= 1
+
+    listed_after = client.get("/api/subscriptions", headers=headers)
+    after = listed_after.json()[0]
+    assert after["new_count"] == 1
+    assert after["last_pushed_at"] != old_pushed
+    assert after["last_checked_at"] == before["last_checked_at"]
+
+
+def test_mark_read_clears_count_keeps_push_time(tmp_path):
+    """Mark-read clears new_count and advances last_checked_at, but does not change last_pushed_at."""
+    client = make_client(tmp_path)
+    user = register_user(client, "alice")
+    headers = auth_headers(user["token"])
+    engine = client.app.state.engine
+
+    seed_jobs(engine, [
+        {
+            "institution_id": 1,
+            "institution_name": "测试医院",
+            "institution_type": "医院",
+            "region": "北京",
+            "title": "内科主治医师",
+            "source_url": "https://example.com/mr1",
+            "source_text_hash": "mr1",
+            "raw_text": "内科主治医师招聘",
+            "parser_name": "test",
+            "job_category": "临床",
+            "confidence": 0.9,
+            "fetched_at": iso_days_ago(1),
+        },
+    ])
+
+    created = client.post(
+        "/api/subscriptions",
+        json={"name": "内科订阅", "keyword": "内科", "institution_ids": [1]},
+        headers=headers,
+    )
+    sub_id = created.json()["id"]
+    _backdate_subscription(engine, sub_id, days=2)
+
+    client.post("/api/subscriptions/scan", headers=headers)
+    listed = client.get("/api/subscriptions", headers=headers)
+    pushed_at = listed.json()[0]["last_pushed_at"]
+
+    resp = client.post(f"/api/subscriptions/{sub_id}/mark-read", headers=headers)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["new_count"] == 0
+    assert data["last_pushed_at"] == pushed_at
+
+
+def test_consecutive_scans_dont_stack_count(tmp_path):
+    """Multiple scans do not stack new_count; it's always relative to last_checked_at."""
+    client = make_client(tmp_path)
+    user = register_user(client, "alice")
+    headers = auth_headers(user["token"])
+    engine = client.app.state.engine
+
+    seed_jobs(engine, [
+        {
+            "institution_id": 1,
+            "institution_name": "测试医院",
+            "institution_type": "医院",
+            "region": "北京",
+            "title": "内科主治医师",
+            "source_url": "https://example.com/cs1",
+            "source_text_hash": "cs1",
+            "raw_text": "内科主治医师招聘",
+            "parser_name": "test",
+            "job_category": "临床",
+            "confidence": 0.9,
+            "fetched_at": iso_days_ago(1),
+        },
+    ])
+
+    created = client.post(
+        "/api/subscriptions",
+        json={"name": "内科订阅", "keyword": "内科", "institution_ids": [1]},
+        headers=headers,
+    )
+    sub_id = created.json()["id"]
+    _backdate_subscription(engine, sub_id, days=2)
+
+    client.post("/api/subscriptions/scan", headers=headers)
+    listed1 = client.get("/api/subscriptions", headers=headers)
+    assert listed1.json()[0]["new_count"] == 1
+
+    client.post("/api/subscriptions/scan", headers=headers)
+    listed2 = client.get("/api/subscriptions", headers=headers)
+    assert listed2.json()[0]["new_count"] == 1
+
+
+def test_maintenance_institution_excluded_from_count(tmp_path):
+    """Jobs at maintenance institutions are not counted in new_count."""
+    client = make_client(tmp_path)
+    user = register_user(client, "alice")
+    headers = auth_headers(user["token"])
+    engine = client.app.state.engine
+
+    disabled_id = 8  # institution 8 is enabled=False in seeds
+
+    seed_jobs(engine, [
+        {
+            "institution_id": 1,
+            "institution_name": "瑞金医院",
+            "institution_type": "医院",
+            "region": "上海",
+            "title": "内科主治医师",
+            "source_url": "https://example.com/maint1",
+            "source_text_hash": "maint1",
+            "raw_text": "内科主治医师招聘",
+            "parser_name": "test",
+            "job_category": "临床",
+            "confidence": 0.9,
+            "fetched_at": iso_days_ago(1),
+        },
+        {
+            "institution_id": disabled_id,
+            "institution_name": "同济医院",
+            "institution_type": "医院",
+            "region": "湖北",
+            "title": "内科住院医师",
+            "source_url": "https://example.com/maint2",
+            "source_text_hash": "maint2",
+            "raw_text": "内科住院医师招聘",
+            "parser_name": "test",
+            "job_category": "临床",
+            "confidence": 0.9,
+            "fetched_at": iso_days_ago(1),
+        },
+    ])
+
+    created = client.post(
+        "/api/subscriptions",
+        json={"name": "内科订阅", "keyword": "内科", "institution_ids": [1, disabled_id]},
+        headers=headers,
+    )
+    sub_id = created.json()["id"]
+    _backdate_subscription(engine, sub_id, days=2)
+
+    listed = client.get("/api/subscriptions", headers=headers)
+    sub = listed.json()[0]
+    assert sub["new_count"] == 1  # only institution 1's job counted
+    statuses = {s["id"]: s for s in sub["institution_statuses"]}
+    assert statuses[disabled_id]["is_maintenance"] is True
+
+
+def test_scan_excludes_maintenance_institutions(tmp_path):
+    """Scan does not advance last_pushed_at if only maintenance institutions have new jobs."""
+    client = make_client(tmp_path)
+    user = register_user(client, "alice")
+    headers = auth_headers(user["token"])
+    engine = client.app.state.engine
+
+    disabled_id = 8
+
+    seed_jobs(engine, [
+        {
+            "institution_id": disabled_id,
+            "institution_name": "同济医院",
+            "institution_type": "医院",
+            "region": "湖北",
+            "title": "内科住院医师",
+            "source_url": "https://example.com/scan-excl",
+            "source_text_hash": "scan-excl",
+            "raw_text": "内科住院医师招聘",
+            "parser_name": "test",
+            "job_category": "临床",
+            "confidence": 0.9,
+            "fetched_at": iso_days_ago(1),
+        },
+    ])
+
+    created = client.post(
+        "/api/subscriptions",
+        json={"name": "内科订阅", "keyword": "内科", "institution_ids": [1, disabled_id]},
+        headers=headers,
+    )
+    sub_id = created.json()["id"]
+    _backdate_subscription(engine, sub_id, days=2)
+
+    resp = client.post("/api/subscriptions/scan", headers=headers)
+    assert resp.status_code == 200
+    assert resp.json()["pushed"] == 0  # no active institution had new jobs
+
+    listed = client.get("/api/subscriptions", headers=headers)
+    sub = listed.json()[0]
+    assert sub["last_pushed_at"] is not None
+    # last_pushed_at should still be the backdated value (not advanced)
+    old_pushed = iso_days_ago(2)
+    assert sub["last_pushed_at"] <= old_pushed
+
+
+def test_scan_requires_auth(tmp_path):
+    """POST /api/subscriptions/scan requires authentication."""
+    client = make_client(tmp_path)
+    resp = client.post("/api/subscriptions/scan")
+    assert resp.status_code == 401
+
+
+def test_crawl_triggers_subscription_scan(tmp_path):
+    """After a crawl run completes, subscription scan is triggered automatically."""
+    import time
+
+    client = make_client(tmp_path)
+    user = register_user(client, "alice")
+    headers = auth_headers(user["token"])
+    engine = client.app.state.engine
+
+    created = client.post(
+        "/api/subscriptions",
+        json={"name": " fixture订阅", "keyword": "医", "institution_ids": [1]},
+        headers=headers,
+    )
+    sub_id = created.json()["id"]
+    _backdate_subscription(engine, sub_id, days=2)
+
+    crawl_resp = client.post("/api/crawl-runs", json={"institution_ids": [1]})
+    assert crawl_resp.status_code == 201
+    run_id = crawl_resp.json()["id"]
+
+    for _ in range(60):
+        run = client.get(f"/api/crawl-runs/{run_id}").json()
+        if run.get("completed_at"):
+            break
+        time.sleep(0.5)
+
+    assert run.get("completed_at") is not None
+
+    listed = client.get("/api/subscriptions", headers=headers)
+    sub = listed.json()[0]
+    # After crawl, jobs were inserted with fetched_at=now > backdated last_pushed_at
+    # so scan should have advanced last_pushed_at
+    old_pushed = iso_days_ago(2)
+    assert sub["last_pushed_at"] > old_pushed
+
+
+def test_scheduler_injectable_clock(tmp_path):
+    """Scheduler scan_once uses the injected clock for timestamps."""
+    from datetime import datetime, timezone
+    from app.services.database import create_engine, init_db, reset_db
+    from app.services.scheduler import SubscriptionScheduler
+
+    fixed_time = datetime(2026, 1, 15, 10, 30, 0, tzinfo=timezone.utc)
+    db_path = tmp_path / "sched-test.db"
+    engine = create_engine(f"sqlite:///{db_path}")
+    reset_db(engine)
+    init_db(engine)
+
+    from app.services.repositories import create_user, create_subscription
+    from app.services.auth import hash_password
+    password_hash, password_salt = hash_password("secret123")
+    user = create_user(engine, "sched_user", password_hash, password_salt)
+    sub = create_subscription(engine, user["id"], "测试", "内科", [1])
+
+    seed_jobs(engine, [
+        {
+            "institution_id": 1,
+            "institution_name": "瑞金医院",
+            "institution_type": "医院",
+            "region": "上海",
+            "title": "内科主治医师",
+            "source_url": "https://example.com/sched1",
+            "source_text_hash": "sched1",
+            "raw_text": "内科主治医师招聘",
+            "parser_name": "test",
+            "job_category": "临床",
+            "confidence": 0.9,
+            "fetched_at": iso_now(),
+        },
+    ])
+
+    # Backdate last_pushed_at so the fresh job appears "new since last push"
+    with connect(engine) as conn:
+        conn.execute(
+            "UPDATE subscriptions SET last_pushed_at = ? WHERE id = ?",
+            (iso_days_ago(2), sub["id"]),
+        )
+        conn.commit()
+
+    scheduler = SubscriptionScheduler(
+        engine,
+        hour=9,
+        minute=0,
+        enabled=False,
+        clock=lambda: fixed_time,
+    )
+    result = scheduler.scan_once()
+    assert result["pushed"] >= 1
+
+    with connect(engine) as conn:
+        row = conn.execute(
+            "SELECT last_pushed_at FROM subscriptions WHERE id = ?",
+            (sub["id"],),
+        ).fetchone()
+    assert row["last_pushed_at"].startswith("2026-01-15T10:30:00")
+
+
+def test_scheduler_config_values():
+    """Config exposes scheduler settings with correct defaults."""
+    from app.config import config
+
+    assert hasattr(config, "subscription_scan_enabled")
+    assert isinstance(config.subscription_scan_enabled, bool)
+    assert config.subscription_scan_hour == 9
+    assert config.subscription_scan_minute == 0
+
+
+def test_subscription_response_has_last_pushed_at(tmp_path):
+    """Subscription response includes last_pushed_at field."""
+    client = make_client(tmp_path)
+    user = register_user(client, "alice")
+    headers = auth_headers(user["token"])
+
+    resp = client.post(
+        "/api/subscriptions",
+        json={"name": "测试", "keyword": "内科", "institution_ids": [1]},
+        headers=headers,
+    )
+    data = resp.json()
+    assert "last_pushed_at" in data
+    assert data["last_pushed_at"] is not None
