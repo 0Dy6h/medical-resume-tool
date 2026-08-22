@@ -4,6 +4,7 @@ import { StatusPill } from "../components/StatusPill";
 import { useToast } from "../components/Toast";
 import { api } from "../lib/api";
 import { formatDate } from "../lib/format";
+import { findingLabel, findingTone } from "../lib/matchAnalysis";
 import type { Job, JobDetail, JobMatch } from "../types";
 
 const EDUCATION_LEVELS = ["博士", "硕士", "本科", "大专"];
@@ -305,6 +306,11 @@ export function JobsPage({ onNavigate }: { onNavigate: (page: string) => void })
                 <ExternalLink size={18} />
               </a>
             </div>
+            {detail.confidence < 0.6 && (
+              <div className="match-warning-bar">
+                该职位由系统自动解析，部分信息可能存在误差，建议点击原始链接核对
+              </div>
+            )}
             <div className="fact-grid">
               <span>部门</span><strong>{detail.department ?? "未注明"}</strong>
               <span>地区</span><strong>{detail.region}</strong>
@@ -351,6 +357,40 @@ export function JobsPage({ onNavigate }: { onNavigate: (page: string) => void })
             <p>{detail.responsibilities}</p>
             <h3>要求</h3>
             <p>{detail.requirements}</p>
+            <section className="match-analysis-panel">
+              <div className="panel-head">
+                <h3>硬性要求匹配分析</h3>
+              </div>
+              {detail.match_analysis == null ? (
+                <div className="match-analysis-empty">
+                  <span className="subtle">登录并完善档案后查看匹配分析</span>
+                  <button className="match-guide-link" onClick={() => onNavigate("profile")}>去完善档案</button>
+                </div>
+              ) : (
+                detail.match_analysis.map((finding, index) => (
+                  <div className={`match-finding-card ${finding.status}`} key={`${finding.requirement}-${index}`}>
+                    <div className="match-finding-bar" />
+                    <div className="match-finding-body">
+                      <div className="match-finding-head">
+                        <strong>{finding.requirement}</strong>
+                        <span className={`status ${findingTone(finding.status)}`}>{findingLabel(finding.status)}</span>
+                      </div>
+                      {finding.evidence.length > 0 && (
+                        <div className="match-finding-evidence">
+                          {finding.evidence.map((ev, i) => (
+                            <div className="evidence-row" key={i}>
+                              <span>{ev.source ?? "履历"}</span>
+                              <strong>{ev.text ?? "—"}</strong>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {finding.advice && <p className="match-finding-advice">{finding.advice}</p>}
+                    </div>
+                  </div>
+                ))
+              )}
+            </section>
             <h3>标签</h3>
             <div className="tag-row">
               {detail.tags.map((tag) => <span className="tag" key={tag}>{tag}</span>)}

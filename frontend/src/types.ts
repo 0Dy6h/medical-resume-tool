@@ -66,6 +66,15 @@ export type JobUserStatus = {
   updated_at: string;
 };
 
+export type MatchState = "met" | "partial" | "unmet" | "blocking";
+
+export type MatchFinding = {
+  requirement: string;
+  status: MatchState;
+  evidence: { source?: string; text?: string }[];
+  advice?: string | null;
+};
+
 export type JobDetail = Job & {
   raw_snapshot: {
     source_url: string;
@@ -83,6 +92,7 @@ export type JobDetail = Job & {
     headers?: string[];
     parser_warning?: string;
   };
+  match_analysis?: MatchFinding[] | null;
 };
 
 export type JobList = {

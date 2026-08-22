@@ -363,6 +363,7 @@ class JobListOut(BaseModel):
 class JobDetailOut(JobOut):
     raw_snapshot: RawSnapshot
     extraction_evidence: dict[str, Any]
+    match_analysis: list[dict[str, Any]] | None = None
 
 
 class AnalyticsSummary(BaseModel):

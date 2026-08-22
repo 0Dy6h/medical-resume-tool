@@ -364,6 +364,48 @@ def summarize_match(evidence: list[dict[str, Any]], gaps: list[dict[str, Any]]) 
     return {"met": met, "total": total, "degree_percent": degree, "blocking_gap": blocking}
 
 
+def analyze_job_match(profile: Profile, job: dict[str, Any]) -> list[dict[str, Any]]:
+    """Per-requirement match breakdown for the job detail page (PRD 4.2).
+
+    Groups the (evidence, gaps) from match_profile_to_job by requirement and
+    classifies each into one of four states:
+      - "met"      : has evidence, no blocking gap
+      - "partial"  : has evidence AND a non-blocking gap (related but incomplete)
+      - "blocking" : any gap with blocking=True (e.g. degree categorical mismatch)
+      - "unmet"    : only gap(s), no evidence found
+    Each item: {requirement, status, evidence: [...], advice: str|None}.
+    """
+    evidence, gaps = match_profile_to_job(profile, job)
+    by_req: dict[str, dict] = {}
+    for e in evidence:
+        r = e.get("requirement")
+        by_req.setdefault(r, {"evidence": [], "gaps": []})
+        by_req[r]["evidence"].append(e)
+    for g in gaps:
+        r = g.get("requirement")
+        by_req.setdefault(r, {"evidence": [], "gaps": []})
+        by_req[r]["gaps"].append(g)
+    out = []
+    for req, grp in by_req.items():
+        ev, gp = grp["evidence"], grp["gaps"]
+        if any(bool(g.get("blocking")) for g in gp):
+            status = "blocking"
+        elif ev and gp:
+            status = "partial"
+        elif ev:
+            status = "met"
+        else:
+            status = "unmet"
+        advice = next((g.get("message") for g in gp), None)
+        out.append({
+            "requirement": req,
+            "status": status,
+            "evidence": [{"source": e.get("source_label"), "text": e.get("source_text")} for e in ev],
+            "advice": advice,
+        })
+    return out
+
+
 def attach_job_matches(
     engine: "DatabaseEngine", jobs: list[dict[str, Any]], user_id: int | None
 ) -> list[dict[str, Any]]:

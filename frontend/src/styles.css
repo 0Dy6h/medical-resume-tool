@@ -1576,3 +1576,95 @@ pre {
     grid-template-columns: 1fr;
   }
 }
+
+/* Match analysis panel — job detail per-requirement breakdown (PRD 4.2) */
+.match-warning-bar {
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--amber);
+  border-radius: 6px;
+  background: var(--amber-soft);
+  color: var(--amber);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.match-analysis-panel {
+  margin-top: 14px;
+  margin-bottom: 8px;
+}
+
+.match-analysis-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 14px;
+  border: 1px dashed var(--line);
+  border-radius: 6px;
+  background: #f7faf8;
+}
+
+.match-finding-card {
+  display: grid;
+  grid-template-columns: 4px 1fr;
+  gap: 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+  margin-bottom: 8px;
+  background: var(--surface-strong);
+}
+
+.match-finding-bar {
+  width: 4px;
+  min-height: 100%;
+  background: var(--line);
+}
+
+.match-finding-card.met .match-finding-bar {
+  background: var(--green);
+}
+
+.match-finding-card.partial .match-finding-bar {
+  background: var(--amber);
+}
+
+.match-finding-card.blocking .match-finding-bar {
+  background: var(--red);
+}
+
+.match-finding-card.unmet .match-finding-bar {
+  background: var(--red);
+}
+
+.match-finding-body {
+  padding: 10px 12px;
+  min-width: 0;
+}
+
+.match-finding-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.match-finding-head strong {
+  min-width: 0;
+  line-height: 1.45;
+}
+
+.match-finding-evidence {
+  display: grid;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.match-finding-advice {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}

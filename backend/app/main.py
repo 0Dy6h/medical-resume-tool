@@ -57,7 +57,7 @@ from app.services.repositories import (
     upsert_job_status,
     create_resume_draft as persist_resume_draft,
 )
-from app.services.resume import PROFILE_COLLECTIONS, attach_job_matches, generate_resume_draft
+from app.services.resume import PROFILE_COLLECTIONS, analyze_job_match, attach_job_matches, generate_resume_draft
 
 
 DEFAULT_DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./data/app.db")
@@ -168,6 +168,14 @@ def create_app(database_url: str | None = None) -> FastAPI:
             job = get_job(engine, job_id, user_id=user["id"] if user else None)
         except KeyError:
             raise HTTPException(status_code=404, detail="岗位不存在") from None
+        match_analysis = None
+        if user:
+            try:
+                prof = get_profile(engine, user["id"])
+                if not prof.is_empty:
+                    match_analysis = analyze_job_match(prof, job)
+            except KeyError:
+                pass
         return {
             **job,
             "raw_snapshot": {
@@ -176,6 +184,7 @@ def create_app(database_url: str | None = None) -> FastAPI:
                 "fetched_at": job["fetched_at"],
                 "raw_text": job["raw_text"],
             },
+            "match_analysis": match_analysis,
         }
 
     @app.put("/api/jobs/{job_id}/status", response_model=JobStatusOut)
