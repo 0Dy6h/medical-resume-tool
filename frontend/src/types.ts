@@ -214,3 +214,22 @@ export type Report = {
   filters: Record<string, unknown>;
   created_at: string;
 };
+
+export type SubscriptionInstitutionStatus = {
+  id: number;
+  name: string;
+  is_maintenance: boolean;
+};
+
+export type Subscription = {
+  id: number;
+  name: string;
+  keyword: string;
+  institution_ids: number[];
+  institution_statuses: SubscriptionInstitutionStatus[];
+  new_count: number;
+  last_checked_at: string;
+  is_empty_30d: boolean;
+  warning?: string | null;
+  created_at: string;
+};

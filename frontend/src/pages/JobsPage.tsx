@@ -1,11 +1,13 @@
 import { BookmarkCheck, BookmarkPlus, ExternalLink, RefreshCcw, Search, WandSparkles, X } from "lucide-react";
 import { useEffect, useState } from "react";
+import { SubscriptionsPanel } from "../components/SubscriptionsPanel";
 import { StatusPill } from "../components/StatusPill";
 import { useToast } from "../components/Toast";
+import { useAuth } from "../components/AuthContext";
 import { api } from "../lib/api";
 import { formatDate } from "../lib/format";
 import { findingLabel, findingTone } from "../lib/matchAnalysis";
-import type { Job, JobDetail, JobMatch } from "../types";
+import type { Institution, Job, JobDetail, JobMatch } from "../types";
 
 const EDUCATION_LEVELS = ["博士", "硕士", "本科", "大专"];
 const JOB_STATUS_OPTIONS = [
@@ -57,6 +59,7 @@ export function canGenerateDraft(matchAnalysis: unknown): boolean {
 export function JobsPage({ onNavigate }: { onNavigate: (page: string) => void }) {
   const PAGE_SIZE = 50;
   const toast = useToast();
+  const auth = useAuth();
   const [keyword, setKeyword] = useState("");
   const [category, setCategory] = useState("");
   const [region, setRegion] = useState("");
@@ -64,6 +67,7 @@ export function JobsPage({ onNavigate }: { onNavigate: (page: string) => void })
   const [education, setEducation] = useState("");
   const [regions, setRegions] = useState<string[]>([]);
   const [institutionTypes, setInstitutionTypes] = useState<string[]>([]);
+  const [institutions, setInstitutions] = useState<Institution[]>([]);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(0);
@@ -175,12 +179,22 @@ export function JobsPage({ onNavigate }: { onNavigate: (page: string) => void })
       .catch(() => {
         /* 筛选项加载失败不阻断岗位列表 */
       });
+    api
+      .institutions()
+      .then((insts) => {
+        setInstitutions(insts);
+      })
+      .catch(() => {
+        /* 机构列表加载失败不阻断岗位列表 */
+      });
   }, []);
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   return (
-    <div className="split-page">
+    <div className="jobs-layout">
+      <SubscriptionsPanel institutions={institutions} isLoggedIn={!!auth.token} />
+      <div className="split-page">
       <section className="panel table-panel">
         <div className="toolbar compact">
           <div>
@@ -467,6 +481,7 @@ export function JobsPage({ onNavigate }: { onNavigate: (page: string) => void })
           <div className="empty-line">暂无选中岗位</div>
         )}
       </aside>
+      </div>
     </div>
   );
 }

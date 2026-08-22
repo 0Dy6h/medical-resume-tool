@@ -31,6 +31,8 @@ from app.schemas import (
     ResumeDraftOut,
     ResumeDraftUpdate,
     StructuredJDOut,
+    SubscriptionCreate,
+    SubscriptionOut,
 )
 from app.services.analytics import analytics_summary, generate_report
 from app.services.auth import hash_password, make_token, verify_password, verify_token
@@ -40,18 +42,28 @@ from app.services.exporter import export_docx, export_pdf
 from app.services.jd_structurer import structure_jd_from_job
 from app.services.profile_import import ProfileImportError, build_profile_contract, extract_profile_text
 from app.services.repositories import (
+    count_new_jobs_for_subscription,
+    count_total_jobs_in_institutions,
+    count_total_matching_jobs,
     create_crawl_run,
+    create_subscription,
     create_user,
     delete_job_status,
+    delete_subscription,
     get_crawl_run,
     get_institutions_by_ids,
+    get_institutions_status,
     get_job,
     get_profile,
     get_resume_draft,
+    get_subscription,
     get_user_by_id,
     get_user_by_username,
+    has_matching_jobs_last_30d,
     list_institutions,
     list_jobs,
+    list_subscriptions,
+    mark_subscription_read,
     save_profile,
     update_resume_draft_sections,
     upsert_job_status,
@@ -372,6 +384,105 @@ def create_app(database_url: str | None = None) -> FastAPI:
             media_type="application/pdf",
             headers={"Content-Disposition": f'attachment; filename="resume-{draft_id}.pdf"'},
         )
+
+    # ── Subscriptions (PRD 4.1) ────────────────────────────────────────
+
+    def _enrich_subscription(sub: dict, engine: DatabaseEngine) -> dict:
+        """Attach computed fields: new_count, institution_statuses, is_empty_30d."""
+        institution_ids = sub["institution_ids"]
+        new_count = count_new_jobs_for_subscription(
+            engine, sub["keyword"], institution_ids, sub["last_checked_at"]
+        )
+        institution_statuses = get_institutions_status(engine, institution_ids)
+        is_empty_30d = not has_matching_jobs_last_30d(
+            engine, sub["keyword"], institution_ids
+        )
+        return {
+            **sub,
+            "new_count": new_count,
+            "institution_statuses": institution_statuses,
+            "is_empty_30d": is_empty_30d,
+        }
+
+    BROAD_KEYWORD_RATIO = 0.5  # >50% match ratio = broad keyword
+
+    def _maybe_broad_keyword_warning(
+        engine: DatabaseEngine, keyword: str, institution_ids: list[int]
+    ) -> str | None:
+        """Return a warning string if the keyword is too broad, else None."""
+        total = count_total_jobs_in_institutions(engine, institution_ids)
+        if total == 0:
+            return None
+        matched = count_total_matching_jobs(engine, keyword, institution_ids)
+        ratio = matched / total
+        if ratio > BROAD_KEYWORD_RATIO:
+            return f"关键词过宽，命中 {matched} 条职位（占比 {int(ratio * 100)}%），建议缩小范围"
+        return None
+
+    @app.post("/api/subscriptions", response_model=SubscriptionOut, status_code=201)
+    def create_subscription_endpoint(
+        payload: SubscriptionCreate,
+        engine: Annotated[DatabaseEngine, Depends(get_engine)],
+        user: Annotated[dict, Depends(get_current_user)],
+    ) -> dict:
+        # Resolve institution_ids: default to all enabled institutions
+        if payload.institution_ids is not None:
+            institution_ids = payload.institution_ids
+        else:
+            enabled = list_institutions(engine)
+            institution_ids = [inst["id"] for inst in enabled if inst["enabled"]]
+            # Cap at 12
+            institution_ids = institution_ids[:12]
+
+        # Validate all institution IDs exist
+        institutions = get_institutions_by_ids(engine, institution_ids)
+        if len(institutions) != len(institution_ids):
+            raise HTTPException(status_code=400, detail="部分机构不存在")
+
+        sub = create_subscription(
+            engine,
+            user["id"],
+            payload.name.strip(),
+            payload.keyword.strip(),
+            institution_ids,
+        )
+        enriched = _enrich_subscription(sub, engine)
+        warning = _maybe_broad_keyword_warning(engine, payload.keyword.strip(), institution_ids)
+        if warning:
+            enriched["warning"] = warning
+        return enriched
+
+    @app.get("/api/subscriptions", response_model=list[SubscriptionOut])
+    def list_subscriptions_endpoint(
+        engine: Annotated[DatabaseEngine, Depends(get_engine)],
+        user: Annotated[dict, Depends(get_current_user)],
+    ) -> list[dict]:
+        subs = list_subscriptions(engine, user["id"])
+        return [_enrich_subscription(sub, engine) for sub in subs]
+
+    @app.delete("/api/subscriptions/{subscription_id}", status_code=204)
+    def delete_subscription_endpoint(
+        subscription_id: int,
+        engine: Annotated[DatabaseEngine, Depends(get_engine)],
+        user: Annotated[dict, Depends(get_current_user)],
+    ) -> Response:
+        try:
+            delete_subscription(engine, user["id"], subscription_id)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="订阅不存在") from None
+        return Response(status_code=204)
+
+    @app.post("/api/subscriptions/{subscription_id}/mark-read", response_model=SubscriptionOut)
+    def mark_subscription_read_endpoint(
+        subscription_id: int,
+        engine: Annotated[DatabaseEngine, Depends(get_engine)],
+        user: Annotated[dict, Depends(get_current_user)],
+    ) -> dict:
+        try:
+            sub = mark_subscription_read(engine, user["id"], subscription_id)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="订阅不存在") from None
+        return _enrich_subscription(sub, engine)
 
     return app
 

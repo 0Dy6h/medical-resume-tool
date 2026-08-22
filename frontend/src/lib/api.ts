@@ -9,7 +9,8 @@ import type {
   Report,
   ResumeDraft,
   ResumeSection,
-  JobUserStatus
+  JobUserStatus,
+  Subscription
 } from "../types";
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "";
@@ -161,6 +162,16 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ title, filters: {} })
     }),
+  subscriptions: () => request<Subscription[]>("/api/subscriptions"),
+  createSubscription: (payload: { name: string; keyword: string; institution_ids?: number[] }) =>
+    request<Subscription>("/api/subscriptions", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    }),
+  deleteSubscription: (id: number) =>
+    request<void>(`/api/subscriptions/${id}`, { method: "DELETE" }),
+  markSubscriptionRead: (id: number) =>
+    request<Subscription>(`/api/subscriptions/${id}/mark-read`, { method: "POST" }),
   exportResume: async (
     draftId: number,
     format: "docx" | "pdf",

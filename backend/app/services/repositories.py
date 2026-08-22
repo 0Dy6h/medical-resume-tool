@@ -468,3 +468,208 @@ def save_report(engine: DatabaseEngine, title: str, markdown: str, html: str, fi
         conn.commit()
         report_id = int(cur.lastrowid)
     return {"id": report_id, "title": title, "markdown": markdown, "html": html, "filters": filters, "created_at": created}
+
+
+# ── Subscriptions (PRD 4.1) ──────────────────────────────────────────
+
+
+def create_subscription(
+    engine: DatabaseEngine,
+    user_id: int,
+    name: str,
+    keyword: str,
+    institution_ids: list[int],
+) -> dict[str, Any]:
+    """Create a subscription. last_checked_at is set to creation time."""
+    now = now_iso()
+    with connect(engine) as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO subscriptions (
+                user_id, name, keyword, institution_ids,
+                last_checked_at, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (user_id, name, keyword, to_json(institution_ids), now, now, now),
+        )
+        conn.commit()
+        sub_id = int(cur.lastrowid)
+    return get_subscription(engine, user_id, sub_id)
+
+
+def get_subscription(engine: DatabaseEngine, user_id: int, subscription_id: int) -> dict[str, Any]:
+    """Get a subscription by id, scoped to user. Raises KeyError if not found."""
+    with connect(engine) as conn:
+        row = conn.execute(
+            "SELECT * FROM subscriptions WHERE id = ? AND user_id = ?",
+            (subscription_id, user_id),
+        ).fetchone()
+    if row is None:
+        raise KeyError(subscription_id)
+    item = dict(row)
+    item["institution_ids"] = from_json(item["institution_ids"], [])
+    return item
+
+
+def list_subscriptions(engine: DatabaseEngine, user_id: int) -> list[dict[str, Any]]:
+    """List all subscriptions for a user, ordered by creation time (newest first)."""
+    with connect(engine) as conn:
+        rows = conn.execute(
+            "SELECT * FROM subscriptions WHERE user_id = ? ORDER BY created_at DESC, id DESC",
+            (user_id,),
+        ).fetchall()
+    items = [dict(row) for row in rows]
+    for item in items:
+        item["institution_ids"] = from_json(item["institution_ids"], [])
+    return items
+
+
+def delete_subscription(engine: DatabaseEngine, user_id: int, subscription_id: int) -> None:
+    """Delete a subscription. Raises KeyError if not found."""
+    with connect(engine) as conn:
+        cur = conn.execute(
+            "DELETE FROM subscriptions WHERE id = ? AND user_id = ?",
+            (subscription_id, user_id),
+        )
+        if cur.rowcount == 0:
+            raise KeyError(subscription_id)
+        conn.commit()
+
+
+def mark_subscription_read(engine: DatabaseEngine, user_id: int, subscription_id: int) -> dict[str, Any]:
+    """Advance last_checked_at to now, resetting the new count.
+
+    Returns the updated subscription.
+    """
+    now = now_iso()
+    with connect(engine) as conn:
+        cur = conn.execute(
+            "UPDATE subscriptions SET last_checked_at = ?, updated_at = ? WHERE id = ? AND user_id = ?",
+            (now, now, subscription_id, user_id),
+        )
+        if cur.rowcount == 0:
+            raise KeyError(subscription_id)
+        conn.commit()
+    return get_subscription(engine, user_id, subscription_id)
+
+
+def count_new_jobs_for_subscription(
+    engine: DatabaseEngine,
+    keyword: str,
+    institution_ids: list[int],
+    last_checked_at: str,
+) -> int:
+    """Count jobs matching keyword + institution that were fetched after last_checked_at."""
+    if not institution_ids:
+        return 0
+    placeholders = ",".join("?" for _ in institution_ids)
+    like = f"%{keyword}%"
+    with connect(engine) as conn:
+        row = conn.execute(
+            f"""
+            SELECT COUNT(*) AS count FROM jobs
+            WHERE institution_id IN ({placeholders})
+              AND fetched_at > ?
+              AND (title LIKE ? OR raw_text LIKE ? OR institution_name LIKE ?)
+            """,
+            [*institution_ids, last_checked_at, like, like, like],
+        ).fetchone()
+    return int(row["count"])
+
+
+def has_matching_jobs_last_30d(
+    engine: DatabaseEngine,
+    keyword: str,
+    institution_ids: list[int],
+    now: str | None = None,
+) -> bool:
+    """Check if any matching job was fetched in the last 30 days."""
+    if not institution_ids:
+        return False
+    from datetime import datetime, timedelta, timezone
+    if now is None:
+        threshold_iso = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+    else:
+        threshold_iso = (datetime.fromisoformat(now) - timedelta(days=30)).isoformat()
+    placeholders = ",".join("?" for _ in institution_ids)
+    like = f"%{keyword}%"
+    with connect(engine) as conn:
+        row = conn.execute(
+            f"""
+            SELECT COUNT(*) AS count FROM jobs
+            WHERE institution_id IN ({placeholders})
+              AND fetched_at >= ?
+              AND (title LIKE ? OR raw_text LIKE ? OR institution_name LIKE ?)
+            LIMIT 1
+            """,
+            [*institution_ids, threshold_iso, like, like, like],
+        ).fetchone()
+    return int(row["count"]) > 0
+
+
+def count_total_matching_jobs(
+    engine: DatabaseEngine,
+    keyword: str,
+    institution_ids: list[int],
+) -> int:
+    """Count total jobs matching keyword + institutions (for broad-keyword check)."""
+    if not institution_ids:
+        return 0
+    placeholders = ",".join("?" for _ in institution_ids)
+    like = f"%{keyword}%"
+    with connect(engine) as conn:
+        row = conn.execute(
+            f"""
+            SELECT COUNT(*) AS count FROM jobs
+            WHERE institution_id IN ({placeholders})
+              AND (title LIKE ? OR raw_text LIKE ? OR institution_name LIKE ?)
+            """,
+            [*institution_ids, like, like, like],
+        ).fetchone()
+    return int(row["count"])
+
+
+def count_total_jobs_in_institutions(engine: DatabaseEngine, institution_ids: list[int]) -> int:
+    """Count total jobs across the given institutions."""
+    if not institution_ids:
+        return 0
+    placeholders = ",".join("?" for _ in institution_ids)
+    with connect(engine) as conn:
+        row = conn.execute(
+            f"SELECT COUNT(*) AS count FROM jobs WHERE institution_id IN ({placeholders})",
+            institution_ids,
+        ).fetchone()
+    return int(row["count"])
+
+
+def get_institutions_status(engine: DatabaseEngine, institution_ids: list[int]) -> list[dict[str, Any]]:
+    """Get institution status info for subscription display.
+
+    Returns list of {id, name, is_maintenance}.
+    An institution is in maintenance when enabled=false or last_status='failed'.
+    """
+    if not institution_ids:
+        return []
+    placeholders = ",".join("?" for _ in institution_ids)
+    with connect(engine) as conn:
+        rows = conn.execute(
+            f"""
+            SELECT id, name, enabled, last_status
+            FROM institutions
+            WHERE id IN ({placeholders})
+            ORDER BY id
+            """,
+            institution_ids,
+        ).fetchall()
+    result = []
+    for row in rows:
+        is_maintenance = (
+            not bool(row["enabled"])
+            or row["last_status"] == "failed"
+        )
+        result.append({
+            "id": row["id"],
+            "name": row["name"],
+            "is_maintenance": is_maintenance,
+        })
+    return result

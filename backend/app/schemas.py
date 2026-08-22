@@ -525,3 +525,42 @@ class StructuredJDOut(BaseModel):
     job_title: str = ""
     requirements: list[JDRequirement] = Field(default_factory=list)
     summary: str = ""
+
+
+# ── Subscriptions (PRD 4.1) ──────────────────────────────────────────
+
+
+class SubscriptionInstitutionStatus(BaseModel):
+    """Status of an institution within a subscription."""
+    id: int
+    name: str
+    is_maintenance: bool
+
+
+class SubscriptionCreate(BaseModel):
+    """Payload for creating a subscription."""
+    name: str = Field(min_length=2, max_length=30)
+    keyword: str = Field(min_length=1, max_length=50)
+    institution_ids: list[int] | None = Field(default=None)
+
+    @field_validator("institution_ids")
+    @classmethod
+    def _check_institution_count(cls, value: list[int] | None) -> list[int] | None:
+        if value is not None:
+            if len(value) < 1 or len(value) > 12:
+                raise ValueError("机构数量必须在 1-12 之间")
+        return value
+
+
+class SubscriptionOut(BaseModel):
+    """Subscription with push status for the frontend."""
+    id: int
+    name: str
+    keyword: str
+    institution_ids: list[int]
+    institution_statuses: list[SubscriptionInstitutionStatus]
+    new_count: int
+    last_checked_at: str
+    is_empty_30d: bool
+    warning: str | None = None
+    created_at: str

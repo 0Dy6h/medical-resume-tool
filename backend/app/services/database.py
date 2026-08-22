@@ -168,6 +168,19 @@ def init_db(engine: DatabaseEngine) -> None:
                 filters TEXT NOT NULL,
                 created_at TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS subscriptions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL REFERENCES users(id),
+                name TEXT NOT NULL,
+                keyword TEXT NOT NULL,
+                institution_ids TEXT NOT NULL,
+                last_checked_at TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_subscriptions_user ON subscriptions(user_id);
             """
         )
         _migrate_user_scoped_tables(conn)
