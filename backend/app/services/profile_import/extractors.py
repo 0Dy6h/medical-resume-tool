@@ -218,6 +218,8 @@ def _is_education(text: str, block: DocumentBlock) -> bool:
 def _is_experience(text: str, block: DocumentBlock) -> bool:
     if block.section_hint == "experiences":
         return True
+    if _is_education(text, block) or _is_project(text, block):
+        return False
     return _has_any(text, _ORG_SUFFIXES) and _has_any(text, _ROLE_SUFFIXES)
 
 

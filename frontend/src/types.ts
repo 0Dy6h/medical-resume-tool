@@ -132,6 +132,7 @@ export type Profile = {
   teaching: Array<Record<string, unknown>>;
   awards: Array<Record<string, unknown>>;
   languages: Array<Record<string, unknown>>;
+  mode?: "fresh_grad" | "experienced";
   updated_at?: string | null;
 };
 

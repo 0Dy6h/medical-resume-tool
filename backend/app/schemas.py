@@ -206,6 +206,7 @@ class Profile(BaseModel):
     teaching: list[Teaching] = Field(default_factory=list)
     awards: list[Award] = Field(default_factory=list)
     languages: list[Language] = Field(default_factory=list)
+    mode: Literal["fresh_grad", "experienced"] = "experienced"
 
     @classmethod
     def from_legacy_dict(cls, data: dict[str, Any]) -> Profile:
@@ -242,9 +243,8 @@ class Profile(BaseModel):
             salvaged["basics"] = BasicInfo.model_validate(data.get("basics") or {})
         except ValidationError:
             salvaged["basics"] = BasicInfo()
-        for name, field in cls.model_fields.items():
-            if name == "basics":
-                continue
+        for name in PROFILE_COLLECTION_NAMES:
+            field = cls.model_fields[name]
             item_model = field.annotation.__args__[0]  # list[Item] -> Item
             kept = []
             for entry in data.get(name) or []:
@@ -253,6 +253,10 @@ class Profile(BaseModel):
                 except ValidationError:
                     continue
             salvaged[name] = kept
+        # Pass through scalar fields with defaults (e.g. mode)
+        for name in ("mode",):
+            if name in data and data[name] is not None:
+                salvaged[name] = data[name]
         return cls(**salvaged)
 
     @property
@@ -389,6 +393,7 @@ class ProfilePayload(BaseModel):
     teaching: list[Teaching] = Field(default_factory=list)
     awards: list[Award] = Field(default_factory=list)
     languages: list[Language] = Field(default_factory=list)
+    mode: Literal["fresh_grad", "experienced"] = "experienced"
 
     def to_profile(self) -> Profile:
         """Convert this payload into a fully typed ``Profile``.

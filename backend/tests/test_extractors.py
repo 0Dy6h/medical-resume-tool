@@ -93,9 +93,16 @@ def test_multi_entity_block_routes_to_single_primary():
         "- 负责国家自然科学基金面上项目，发表SCI论文3篇",
     ]
     contract = build_profile_contract(lines, [])
-    assert len(contract.experiences) == 1
-    assert contract.projects == []
-    assert contract.publications == []
+    # Single-primary invariant: only one collection gets the block (no fan-out).
+    # With _is_experience mutual exclusion, experience is eliminated when project
+    # signals are present; publication wins on confidence among remaining candidates.
+    primary_collections = sum(
+        1 for name in ("education", "experiences", "projects", "publications", "teaching", "awards", "certificates", "languages")
+        if getattr(contract, name)
+    )
+    assert primary_collections == 1
+    assert len(contract.publications) == 1
+    assert contract.experiences == []
 
 
 def test_basics_extraction_fills_phone_email_and_name():
@@ -121,3 +128,10 @@ def test_basics_extraction_leaves_name_empty_without_signal():
     contract = build_profile_contract(lines, [])
 
     assert "name" not in contract.basics
+
+
+def test_project_block_not_misrouted_to_experience():
+    lines = ["2021.01-2023.12 北京某三甲医院 科研项目 负责人"]
+    contract = build_profile_contract(lines, [])
+    assert len(contract.projects) == 1
+    assert contract.experiences == []

@@ -10,7 +10,8 @@ export const emptyProfile: Profile = {
   skills: [],
   teaching: [],
   awards: [],
-  languages: []
+  languages: [],
+  mode: "experienced"
 };
 
 export const demoProfile: Profile = {
@@ -58,6 +59,7 @@ export const demoProfile: Profile = {
   skills: [{ id: "skill-1", name: "SPSS" }, { id: "skill-2", name: "临床研究" }],
   teaching: [],
   awards: [],
-  languages: [{ id: "lang-1", name: "英语", level: "CET-6" }]
+  languages: [{ id: "lang-1", name: "英语", level: "CET-6" }],
+  mode: "experienced"
 };
 

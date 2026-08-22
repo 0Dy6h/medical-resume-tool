@@ -1,5 +1,5 @@
-import { FileUp, Plus, Save, Sparkles, Trash2 } from "lucide-react";
-import { useRef, useEffect, useState } from "react";
+import { ChevronDown, FileUp, Plus, Save, Sparkles, Trash2 } from "lucide-react";
+import { useRef, useEffect, useState, useMemo } from "react";
 import { useToast } from "../components/Toast";
 import { api } from "../lib/api";
 import { demoProfile, emptyProfile } from "../lib/defaultProfile";
@@ -113,6 +113,40 @@ const configs: CollectionConfig[] = [
 const configByKey = new Map(configs.map((config) => [config.key, config] as const));
 const collectionKeys = configs.map((config) => config.key);
 
+const MODE_LABELS: Record<"fresh_grad" | "experienced", string> = {
+  fresh_grad: "应届生",
+  experienced: "职场人"
+};
+
+/**
+ * Section display order and default collapsed state per profile mode.
+ * Mode only affects presentation order — data is never added or removed.
+ */
+const MODE_LAYOUT: Record<"fresh_grad" | "experienced", { key: keyof Profile; collapsed?: boolean }[]> = {
+  fresh_grad: [
+    { key: "education" },
+    { key: "projects" },
+    { key: "experiences", collapsed: true },
+    { key: "publications" },
+    { key: "teaching" },
+    { key: "awards" },
+    { key: "certificates" },
+    { key: "skills" },
+    { key: "languages" }
+  ],
+  experienced: [
+    { key: "experiences" },
+    { key: "projects" },
+    { key: "education" },
+    { key: "publications" },
+    { key: "teaching" },
+    { key: "awards" },
+    { key: "certificates" },
+    { key: "skills" },
+    { key: "languages" }
+  ]
+};
+
 const BASIC_FIELDS: Field[] = [
   { key: "name", label: "姓名" },
   { key: "phone", label: "电话" },
@@ -168,11 +202,53 @@ export function ProfilePage() {
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
   const [previewBasics, setPreviewBasics] = useState<Record<string, string>>({});
   const [importing, setImporting] = useState(false);
+  const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const currentMode: "fresh_grad" | "experienced" = profile.mode ?? "experienced";
+
+  const orderedConfigs = useMemo(() => {
+    const layout = MODE_LAYOUT[currentMode];
+    return layout.map((item) => {
+      const config = configByKey.get(item.key);
+      return config ? { config, defaultCollapsed: item.collapsed ?? false } : null;
+    }).filter((item): item is { config: CollectionConfig; defaultCollapsed: boolean } => item !== null);
+  }, [currentMode]);
+
   useEffect(() => {
-    api.profile().then((payload) => setProfile({ ...emptyProfile, ...payload }));
+    api.profile().then((payload) => {
+      const loaded = { ...emptyProfile, ...payload };
+      setProfile(loaded);
+      // Set initial collapsed state based on loaded mode
+      const mode = loaded.mode ?? "experienced";
+      const layout = MODE_LAYOUT[mode as "fresh_grad" | "experienced"];
+      const collapsed = new Set<string>();
+      layout.forEach((item) => {
+        if (item.collapsed) collapsed.add(String(item.key));
+      });
+      setCollapsedSections(collapsed);
+    });
   }, []);
+
+  function toggleSection(key: string) {
+    setCollapsedSections((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  function switchMode(mode: "fresh_grad" | "experienced") {
+    setProfile((current) => ({ ...current, mode }));
+    // Reset collapsed state to mode defaults — never touches data
+    const layout = MODE_LAYOUT[mode];
+    const collapsed = new Set<string>();
+    layout.forEach((item) => {
+      if (item.collapsed) collapsed.add(String(item.key));
+    });
+    setCollapsedSections(collapsed);
+  }
 
   async function save() {
     try {
@@ -286,9 +362,29 @@ export function ProfilePage() {
       <div className="toolbar">
         <div>
           <h1>我的履历</h1>
-          <p className="subtle">结构化事实库</p>
+          <p className="subtle">结构化事实库 · 当前模式：{MODE_LABELS[currentMode]}</p>
         </div>
         <div className="button-row">
+          <div className="mode-switch" role="tablist" aria-label="履历模式">
+            <button
+              role="tab"
+              aria-selected={currentMode === "fresh_grad"}
+              className={currentMode === "fresh_grad" ? "mode-tab active" : "mode-tab"}
+              onClick={() => switchMode("fresh_grad")}
+              title="应届生：教育/科研优先，工作经历折叠"
+            >
+              应届生
+            </button>
+            <button
+              role="tab"
+              aria-selected={currentMode === "experienced"}
+              className={currentMode === "experienced" ? "mode-tab active" : "mode-tab"}
+              onClick={() => switchMode("experienced")}
+              title="职场人：工作/成果优先，教育退居次要"
+            >
+              职场人
+            </button>
+          </div>
           <input
             ref={fileInputRef}
             type="file"
@@ -444,38 +540,55 @@ export function ProfilePage() {
         </div>
       </section>
 
-      {configs.map((config) => (
-        <section className="panel form-panel" key={String(config.key)}>
-          <div className="panel-head">
-            <h2>{config.title}</h2>
-            <button className="icon-text-button" onClick={() => addItem(config)}>
-              <Plus size={17} />
-              添加
-            </button>
-          </div>
-          <div className="repeat-list">
-            {((profile[config.key] as Array<Record<string, unknown>>) ?? []).map((item, index) => (
-              <div className="repeat-item" key={String(item.id ?? index)}>
-                <div className="repeat-fields">
-                  {config.fields.map((field) => (
-                    <label className={field.area ? "span-2" : ""} key={field.key}>
-                      <span>{field.label}</span>
-                      {field.area ? (
-                        <textarea value={textValue(item[field.key])} onChange={(event) => updateItem(config, index, field, event.target.value)} />
-                      ) : (
-                        <input value={textValue(item[field.key])} onChange={(event) => updateItem(config, index, field, event.target.value)} />
-                      )}
-                    </label>
-                  ))}
-                </div>
-                <button className="icon-button danger-button" onClick={() => removeItem(config, index)} title="删除">
-                  <Trash2 size={17} />
+      {orderedConfigs.map(({ config }) => {
+        const isCollapsed = collapsedSections.has(String(config.key));
+        const items = (profile[config.key] as Array<Record<string, unknown>>) ?? [];
+        return (
+          <section className="panel form-panel" key={String(config.key)}>
+            <div className="panel-head collapsible-head" onClick={() => toggleSection(String(config.key))}>
+              <h2>
+                {config.title}
+                <ChevronDown
+                  size={16}
+                  className={`chevron ${isCollapsed ? "collapsed" : ""}`}
+                />
+              </h2>
+              {!isCollapsed && (
+                <button
+                  className="icon-text-button"
+                  onClick={(e) => { e.stopPropagation(); addItem(config); }}
+                >
+                  <Plus size={17} />
+                  添加
                 </button>
+              )}
+            </div>
+            {!isCollapsed && (
+              <div className="repeat-list">
+                {items.map((item, index) => (
+                  <div className="repeat-item" key={String(item.id ?? index)}>
+                    <div className="repeat-fields">
+                      {config.fields.map((field) => (
+                        <label className={field.area ? "span-2" : ""} key={field.key}>
+                          <span>{field.label}</span>
+                          {field.area ? (
+                            <textarea value={textValue(item[field.key])} onChange={(event) => updateItem(config, index, field, event.target.value)} />
+                          ) : (
+                            <input value={textValue(item[field.key])} onChange={(event) => updateItem(config, index, field, event.target.value)} />
+                          )}
+                        </label>
+                      ))}
+                    </div>
+                    <button className="icon-button danger-button" onClick={() => removeItem(config, index)} title="删除">
+                      <Trash2 size={17} />
+                    </button>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
-        </section>
-      ))}
+            )}
+          </section>
+        );
+      })}
     </div>
   );
 }

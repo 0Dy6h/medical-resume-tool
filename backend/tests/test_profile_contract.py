@@ -153,3 +153,65 @@ def test_multiline_authors_from_the_editor_is_accepted(client, headers):
     )
     assert saved.status_code == 200
     assert saved.json()["publications"][0]["authors"] == "张三、李四"
+
+
+# ── profile mode (fresh_grad / experienced) ─────────────────────────
+
+
+def test_default_profile_mode_is_experienced():
+    profile = Profile()
+    assert profile.mode == "experienced"
+
+
+def test_mode_round_trips_through_save_and_load(client, headers):
+    saved = client.put(
+        "/api/profile",
+        json={"mode": "fresh_grad", "education": [{"id": "e1", "school": "复旦", "degree": "硕士"}]},
+        headers=headers,
+    )
+    assert saved.status_code == 200
+    assert saved.json()["mode"] == "fresh_grad"
+
+    loaded = client.get("/api/profile", headers=headers).json()
+    assert loaded["mode"] == "fresh_grad"
+    # Data is preserved alongside mode
+    assert len(loaded["education"]) == 1
+    assert loaded["education"][0]["school"] == "复旦"
+
+
+def test_switching_mode_does_not_change_item_counts(client, headers):
+    # Seed with some data in experienced mode
+    client.put(
+        "/api/profile",
+        json={
+            "mode": "experienced",
+            "education": [{"id": "e1", "school": "复旦", "degree": "硕士"}],
+            "experiences": [{"id": "x1", "organization": "某医院", "role": "医师"}],
+            "projects": [{"id": "p1", "name": "队列研究"}],
+        },
+        headers=headers,
+    )
+
+    # Switch to fresh_grad
+    saved = client.put(
+        "/api/profile",
+        json={
+            "mode": "fresh_grad",
+            "education": [{"id": "e1", "school": "复旦", "degree": "硕士"}],
+            "experiences": [{"id": "x1", "organization": "某医院", "role": "医师"}],
+            "projects": [{"id": "p1", "name": "队列研究"}],
+        },
+        headers=headers,
+    ).json()
+
+    assert saved["mode"] == "fresh_grad"
+    assert len(saved["education"]) == 1
+    assert len(saved["experiences"]) == 1
+    assert len(saved["projects"]) == 1
+
+
+def test_legacy_profile_without_mode_defaults_to_experienced():
+    profile = Profile.from_legacy_dict(
+        {"skills": [{"id": "s1", "name": "SPSS"}], "experiences": [{"id": "e1", "organization": "某医院"}]}
+    )
+    assert profile.mode == "experienced"
