@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { flattenReviewItems, computeDraftStatus, reviewTone, filterExportSections, exportBlock } from "./ResumePage";
+import { flattenReviewItems, computeDraftStatus, reviewTone, filterExportSections, exportBlock, readPendingDraftId, PENDING_DRAFT_KEY } from "./ResumePage";
 import type { ResumeSection } from "../types";
 
 const sampleSections: ResumeSection[] = [
@@ -183,5 +183,32 @@ describe("exportBlock — frontend export guard", () => {
     if (result.kind === "confirm") {
       expect(result.pending).toBe(4);
     }
+  });
+});
+
+describe("readPendingDraftId — 待加载草稿 ID 读取", () => {
+  it("返回 null 当存储中没有 pending key", () => {
+    const storage = { getItem: (key: string) => null };
+    expect(readPendingDraftId(storage)).toBeNull();
+  });
+
+  it("返回数字 ID 当存储中有合法的数字字符串", () => {
+    const storage = { getItem: (key: string) => (key === PENDING_DRAFT_KEY ? "42" : null) };
+    expect(readPendingDraftId(storage)).toBe(42);
+  });
+
+  it("返回 null 当值为空字符串", () => {
+    const storage = { getItem: (key: string) => "" };
+    expect(readPendingDraftId(storage)).toBeNull();
+  });
+
+  it("返回 null 当值不是数字", () => {
+    const storage = { getItem: (key: string) => "abc" };
+    expect(readPendingDraftId(storage)).toBeNull();
+  });
+
+  it("返回 null 当值为 0 或负数", () => {
+    expect(readPendingDraftId({ getItem: () => "0" })).toBeNull();
+    expect(readPendingDraftId({ getItem: () => "-5" })).toBeNull();
   });
 });

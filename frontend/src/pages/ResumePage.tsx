@@ -82,6 +82,15 @@ export function exportBlock(sections: ResumeSection[]): ExportGuardResult {
   return { kind: "confirm", pending };
 }
 
+export const PENDING_DRAFT_KEY = "pending_resume_draft_id";
+
+export function readPendingDraftId(storage: { getItem: (key: string) => string | null }): number | null {
+  const raw = storage.getItem(PENDING_DRAFT_KEY);
+  if (raw == null) return null;
+  const id = Number(raw);
+  return Number.isFinite(id) && id > 0 ? id : null;
+}
+
 // ── Review card colours (matching PRD 4.4 prototype) ────────────────
 
 const TONE_STYLES: Record<"green" | "yellow" | "red", { bg: string; border: string; color: string; label: string }> = {
@@ -121,8 +130,26 @@ export function ResumePage() {
     }
   }
 
+  async function loadPendingDraft() {
+    const draftId = readPendingDraftId(localStorage);
+    if (draftId == null) return;
+    try {
+      const draft = await api.getResumeDraft(draftId);
+      localStorage.removeItem(PENDING_DRAFT_KEY);
+      setDraft(draft);
+      setJobId(draft.job_id);
+      setReviewMode(false);
+      setCurrentIndex(0);
+      setEditing(false);
+    } catch (error) {
+      localStorage.removeItem(PENDING_DRAFT_KEY);
+      toast.error(error instanceof Error ? error.message : "加载草稿失败");
+    }
+  }
+
   useEffect(() => {
     void refreshJobs();
+    void loadPendingDraft();
   }, []);
 
   async function generate() {

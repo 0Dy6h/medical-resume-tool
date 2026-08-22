@@ -1,4 +1,4 @@
-import { BookmarkCheck, BookmarkPlus, ExternalLink, RefreshCcw, Search, X } from "lucide-react";
+import { BookmarkCheck, BookmarkPlus, ExternalLink, RefreshCcw, Search, WandSparkles, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { StatusPill } from "../components/StatusPill";
 import { useToast } from "../components/Toast";
@@ -50,6 +50,10 @@ export function freshnessTag(
   return "";
 }
 
+export function canGenerateDraft(matchAnalysis: unknown): boolean {
+  return matchAnalysis != null;
+}
+
 export function JobsPage({ onNavigate }: { onNavigate: (page: string) => void }) {
   const PAGE_SIZE = 50;
   const toast = useToast();
@@ -68,6 +72,7 @@ export function JobsPage({ onNavigate }: { onNavigate: (page: string) => void })
   const [statusValue, setStatusValue] = useState("saved");
   const [statusNote, setStatusNote] = useState("");
   const [statusDeadline, setStatusDeadline] = useState("");
+  const [generatingDraft, setGeneratingDraft] = useState(false);
 
   async function refresh(targetPage = page) {
     setLoading(true);
@@ -142,6 +147,20 @@ export function JobsPage({ onNavigate }: { onNavigate: (page: string) => void })
       toast.success("已清除岗位状态");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "清除岗位状态失败");
+    }
+  }
+
+  async function generateDraft() {
+    if (!detail || detail.match_analysis == null) return;
+    setGeneratingDraft(true);
+    try {
+      const draft = await api.createResumeDraft(detail.id);
+      localStorage.setItem("pending_resume_draft_id", String(draft.id));
+      onNavigate("resume");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "生成简历草稿失败");
+    } finally {
+      setGeneratingDraft(false);
     }
   }
 
@@ -367,28 +386,40 @@ export function JobsPage({ onNavigate }: { onNavigate: (page: string) => void })
                   <button className="match-guide-link" onClick={() => onNavigate("profile")}>去完善档案</button>
                 </div>
               ) : (
-                detail.match_analysis.map((finding, index) => (
-                  <div className={`match-finding-card ${finding.status}`} key={`${finding.requirement}-${index}`}>
-                    <div className="match-finding-bar" />
-                    <div className="match-finding-body">
-                      <div className="match-finding-head">
-                        <strong>{finding.requirement}</strong>
-                        <span className={`status ${findingTone(finding.status)}`}>{findingLabel(finding.status)}</span>
-                      </div>
-                      {finding.evidence.length > 0 && (
-                        <div className="match-finding-evidence">
-                          {finding.evidence.map((ev, i) => (
-                            <div className="evidence-row" key={i}>
-                              <span>{ev.source ?? "履历"}</span>
-                              <strong>{ev.text ?? "—"}</strong>
-                            </div>
-                          ))}
+                <>
+                  {detail.match_analysis.map((finding, index) => (
+                    <div className={`match-finding-card ${finding.status}`} key={`${finding.requirement}-${index}`}>
+                      <div className="match-finding-bar" />
+                      <div className="match-finding-body">
+                        <div className="match-finding-head">
+                          <strong>{finding.requirement}</strong>
+                          <span className={`status ${findingTone(finding.status)}`}>{findingLabel(finding.status)}</span>
                         </div>
-                      )}
-                      {finding.advice && <p className="match-finding-advice">{finding.advice}</p>}
+                        {finding.evidence.length > 0 && (
+                          <div className="match-finding-evidence">
+                            {finding.evidence.map((ev, i) => (
+                              <div className="evidence-row" key={i}>
+                                <span>{ev.source ?? "履历"}</span>
+                                <strong>{ev.text ?? "—"}</strong>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {finding.advice && <p className="match-finding-advice">{finding.advice}</p>}
+                      </div>
                     </div>
+                  ))}
+                  <div className="draft-generate-row">
+                    <button
+                      className="primary-button draft-generate-button"
+                      onClick={() => void generateDraft()}
+                      disabled={generatingDraft}
+                    >
+                      <WandSparkles size={17} />
+                      {generatingDraft ? "生成中…" : "生成简历草稿"}
+                    </button>
                   </div>
-                ))
+                </>
               )}
             </section>
             <h3>标签</h3>

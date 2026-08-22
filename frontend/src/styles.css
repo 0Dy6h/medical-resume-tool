@@ -1668,3 +1668,14 @@ pre {
   font-size: 13px;
   line-height: 1.5;
 }
+
+.draft-generate-row {
+  margin-top: 12px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.draft-generate-button {
+  width: 100%;
+  justify-content: center;
+}

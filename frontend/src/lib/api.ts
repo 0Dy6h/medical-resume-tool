@@ -149,6 +149,8 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ job_id: jobId })
     }),
+  getResumeDraft: (draftId: number) =>
+    request<ResumeDraft>(`/api/resume-drafts/${draftId}`),
   updateResumeDraft: (draftId: number, sections: ResumeSection[]) =>
     request<ResumeDraft>(`/api/resume-drafts/${draftId}`, {
       method: "PUT",

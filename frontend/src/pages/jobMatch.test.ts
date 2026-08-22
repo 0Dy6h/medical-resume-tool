@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeMatchLabel, freshnessTag } from "./JobsPage";
+import { canGenerateDraft, computeMatchLabel, freshnessTag } from "./JobsPage";
 
 describe("computeMatchLabel", () => {
   it("returns none when match is null", () => {
@@ -48,5 +48,17 @@ describe("freshnessTag", () => {
   it("returns empty string when both timestamps are null", () => {
     expect(freshnessTag(null, null, now)).toBe("");
     expect(freshnessTag(undefined, undefined, now)).toBe("");
+  });
+});
+
+describe("canGenerateDraft — 生成简历草稿按钮可见性", () => {
+  it("返回 false 当 match_analysis 为 null（无档案或未登录）", () => {
+    expect(canGenerateDraft(null)).toBe(false);
+    expect(canGenerateDraft(undefined)).toBe(false);
+  });
+
+  it("返回 true 当 match_analysis 有内容（已完善档案）", () => {
+    expect(canGenerateDraft([])).toBe(true);
+    expect(canGenerateDraft([{ requirement: "学历", status: "met", evidence: [] }])).toBe(true);
   });
 });
