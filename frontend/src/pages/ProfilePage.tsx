@@ -122,6 +122,12 @@ const BASIC_FIELDS: Field[] = [
   { key: "summary", label: "个人简介", area: true }
 ];
 
+const PREVIEW_BASICS_FIELDS: { key: string; label: string }[] = [
+  { key: "name", label: "姓名" },
+  { key: "phone", label: "电话" },
+  { key: "email", label: "邮箱" }
+];
+
 function newId(prefix: string) {
   return `${prefix}-${Math.random().toString(16).slice(2, 8)}`;
 }
@@ -160,6 +166,7 @@ export function ProfilePage() {
   const [saved, setSaved] = useState(false);
   const [preview, setPreview] = useState<ProfileImportResult | null>(null);
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
+  const [previewBasics, setPreviewBasics] = useState<Record<string, string>>({});
   const [importing, setImporting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -194,6 +201,7 @@ export function ProfilePage() {
       const reviewCount = result.review_items?.length ?? 0;
       setPreview(result);
       setSelectedKeys(keys);
+      setPreviewBasics(result.basics ?? {});
       if (keys.size === 0 && reviewCount === 0) {
         toast.info("未识别出可导入的条目，请检查文档结构");
       } else if (keys.size === 0 && reviewCount > 0) {
@@ -222,7 +230,8 @@ export function ProfilePage() {
       preview,
       selectedKeys,
       collectionKeys,
-      newId
+      newId,
+      previewBasics
     );
     setProfile(merged);
     setPreview(null);
@@ -266,6 +275,10 @@ export function ProfilePage() {
 
   function updateBasics(key: string, value: string) {
     setProfile((current) => ({ ...current, basics: { ...(current.basics ?? {}), [key]: value } }));
+  }
+
+  function updatePreviewBasics(key: string, value: string) {
+    setPreviewBasics((current) => ({ ...current, [key]: value }));
   }
 
   return (
@@ -321,6 +334,22 @@ export function ProfilePage() {
               {preview.warnings.map((warning, index) => (
                 <div className="gap-card" key={index}>{warning}</div>
               ))}
+            </div>
+          )}
+          {preview.basics && Object.keys(preview.basics).length > 0 && (
+            <div>
+              <h3>基本信息</h3>
+              <div className="repeat-fields">
+                {PREVIEW_BASICS_FIELDS.map((field) => (
+                  <label key={field.key}>
+                    <span>{field.label}</span>
+                    <input
+                      value={previewBasics[field.key] ?? ""}
+                      onChange={(event) => updatePreviewBasics(field.key, event.target.value)}
+                    />
+                  </label>
+                ))}
+              </div>
             </div>
           )}
           {configs.map((config) => {

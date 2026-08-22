@@ -155,7 +155,8 @@ export type ImportMeta = {
   warnings: string[];
 };
 
-export type ProfileImportResult = Omit<Profile, "updated_at"> & {
+export type ProfileImportResult = Omit<Profile, "updated_at" | "basics"> & {
+  basics?: Record<string, string>;
   review_items?: ReviewItem[];
   unassigned_blocks?: UnassignedBlock[];
   import_meta?: ImportMeta;

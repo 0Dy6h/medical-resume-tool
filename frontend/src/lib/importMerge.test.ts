@@ -163,4 +163,29 @@ describe("mergeImportSelection", () => {
     const ids = (profile.skills as Array<{ id: string }>).map((s) => s.id);
     expect(new Set(ids).size).toBe(3);
   });
+
+  it("merges basics as an object, not an array push", () => {
+    counter = 0;
+    const existing = { ...emptyProfile, basics: { name: "旧名", location: "上海" } } as Profile;
+    const preview = {
+      basics: { name: "张三", phone: "13800138000", email: "zhangsan@example.com" }
+    } as unknown as ProfileImportResult;
+
+    const { profile, accepted } = mergeImportSelection(
+      existing,
+      preview,
+      selection(),
+      collections,
+      makeId,
+      { name: "张三", phone: "13800138000", email: "zhangsan@example.com" }
+    );
+
+    expect(accepted).toBe(3);
+    expect(profile.basics).toEqual({
+      name: "张三",
+      phone: "13800138000",
+      email: "zhangsan@example.com",
+      location: "上海"
+    });
+  });
 });

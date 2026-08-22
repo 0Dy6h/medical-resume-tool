@@ -38,6 +38,7 @@ class ExtractedFact:
 @dataclass
 class ProfileImportContract:
     """导入预览合同：已识别 + 待确认 + 未归类。"""
+    basics: dict[str, str] = field(default_factory=dict)
     education: list[dict[str, Any]] = field(default_factory=list)
     experiences: list[dict[str, Any]] = field(default_factory=list)
     projects: list[dict[str, Any]] = field(default_factory=list)
@@ -55,6 +56,7 @@ class ProfileImportContract:
     def to_dict(self) -> dict[str, Any]:
         """转成 API 响应字典。"""
         return {
+            "basics": self.basics,
             "education": self.education,
             "experiences": self.experiences,
             "projects": self.projects,

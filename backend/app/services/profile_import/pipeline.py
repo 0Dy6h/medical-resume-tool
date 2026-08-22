@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.services.profile_import.blocks import build_blocks
-from app.services.profile_import.extractors import COLLECTIONS, extract_facts
+from app.services.profile_import.extractors import COLLECTIONS, build_basics, extract_facts
 from app.services.profile_import.facts import ExtractedFact, ProfileImportContract
 
 
@@ -16,6 +16,7 @@ def build_profile_contract(lines: list[str], extraction_warnings: list[str]) -> 
     """Build the API import-preview contract from extracted text lines."""
     blocks = build_blocks(lines)
     facts = extract_facts(blocks)
+    basics, basics_consumed = build_basics(blocks)
     contract = ProfileImportContract(warnings=list(extraction_warnings))
     assigned_source_texts: set[str] = set()
 
@@ -26,6 +27,9 @@ def build_profile_contract(lines: list[str], extraction_warnings: list[str]) -> 
         elif fact.confidence >= REVIEW_THRESHOLD:
             contract.review_items.append(_review_item(fact))
             assigned_source_texts.add(fact.source_text)
+
+    contract.basics = basics
+    assigned_source_texts.update(basics_consumed)
 
     for block in blocks:
         if block.text not in assigned_source_texts:

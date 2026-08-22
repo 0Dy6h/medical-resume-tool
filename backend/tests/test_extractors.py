@@ -85,3 +85,39 @@ def test_unsectioned_resume_builds_structured_profile_contract():
         "text_quality": 1.0,
         "warnings": [],
     }
+
+
+def test_multi_entity_block_routes_to_single_primary():
+    lines = [
+        "2020.09-2023.06 北京某三甲医院 主治医师",
+        "- 负责国家自然科学基金面上项目，发表SCI论文3篇",
+    ]
+    contract = build_profile_contract(lines, [])
+    assert len(contract.experiences) == 1
+    assert contract.projects == []
+    assert contract.publications == []
+
+
+def test_basics_extraction_fills_phone_email_and_name():
+    lines = [
+        "张三",
+        "电话：13800138000",
+        "邮箱：zhangsan@example.com",
+        "2020.09-2023.06 北京某三甲医院 主治医师",
+    ]
+    contract = build_profile_contract(lines, [])
+
+    assert contract.basics["name"] == "张三"
+    assert contract.basics["phone"] == "13800138000"
+    assert contract.basics["email"] == "zhangsan@example.com"
+    assert contract.unassigned_blocks == []
+
+
+def test_basics_extraction_leaves_name_empty_without_signal():
+    lines = [
+        "2020.09-2023.06 北京某三甲医院 主治医师",
+        "熟悉 Python、SPSS",
+    ]
+    contract = build_profile_contract(lines, [])
+
+    assert "name" not in contract.basics

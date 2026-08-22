@@ -14,6 +14,7 @@ from app.services.profile_import.legacy import (
     _PROJECT_NAME_HINTS,
     _ROLE_SUFFIXES,
     _SCHOOL_SUFFIXES,
+    SECTION_ALIASES,
     _build_award,
     _build_certificate,
     _build_education,
@@ -40,6 +41,17 @@ COLLECTIONS = {
     "languages",
 }
 
+PRIMARY_PRIORITY: tuple[str, ...] = (
+    "experiences",
+    "education",
+    "projects",
+    "publications",
+    "teaching",
+    "awards",
+    "certificates",
+    "languages",
+)
+
 SKILL_TERMS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("SPSS", re.compile(r"SPSS", re.I)),
     ("R语言", re.compile(r"R语言|\bR\b")),
@@ -62,6 +74,17 @@ _TEACHING_HINT = re.compile(r"教学|授课|带教|助教|课程")
 _CLAUSE_SPLIT = re.compile(r"[，,；;、]\s*")
 _SKILL_PREFIX = re.compile(r"^(熟悉|掌握|了解|使用|运用)\s*", re.I)
 
+_PHONE_RE = re.compile(r"1[3-9]\d{9}")
+_EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
+_NAME_LABEL_RE = re.compile(r"(?:姓名|名字|称谓)[:：]\s*(\S{2,4})")
+_PURE_CJK_RE = re.compile(r"^[\u4e00-\u9fff]{2,4}$")
+
+_SECTION_HEADING_TEXTS: set[str] = set()
+for _aliases in SECTION_ALIASES.values():
+    _SECTION_HEADING_TEXTS.update(_aliases)
+
+_PRIORITY_INDEX = {collection: i for i, collection in enumerate(PRIMARY_PRIORITY)}
+
 
 def extract_facts(blocks: list[DocumentBlock]) -> list[ExtractedFact]:
     """Extract profile facts from blocks using collection-specific signals."""
@@ -80,27 +103,88 @@ def extract_skills(text: str) -> list[str]:
     return skills
 
 
+def build_basics(blocks: list[DocumentBlock]) -> tuple[dict[str, str], set[str]]:
+    """Extract basic info (name/phone/email) from blocks.
+
+    Returns (basics_dict, consumed_source_texts). Consumed texts should be
+    excluded from unassigned_blocks to avoid phone/email/name lines polluting it.
+    Never fabricates — fields without a signal are left absent.
+    """
+    basics: dict[str, str] = {}
+    consumed: set[str] = set()
+
+    for index, block in enumerate(blocks):
+        text = block.text
+
+        phone_match = _PHONE_RE.search(text)
+        if phone_match:
+            basics["phone"] = phone_match.group(0)
+            consumed.add(text)
+
+        email_match = _EMAIL_RE.search(text)
+        if email_match:
+            basics["email"] = email_match.group(0)
+            consumed.add(text)
+
+        if "name" not in basics:
+            for line in block.lines:
+                line_text = line.text
+                if not line_text:
+                    continue
+                name_match = _NAME_LABEL_RE.search(line_text)
+                if name_match:
+                    basics["name"] = name_match.group(1).strip()
+                    consumed.add(text)
+                    break
+                if index < 3 and _is_likely_name(line_text):
+                    basics["name"] = line_text.strip()
+                    consumed.add(text)
+                    break
+
+    return basics, consumed
+
+
+def _is_likely_name(text: str) -> bool:
+    stripped = text.strip()
+    if not _PURE_CJK_RE.match(stripped):
+        return False
+    if stripped in _SECTION_HEADING_TEXTS:
+        return False
+    for suffix_list in (_ORG_SUFFIXES, _ROLE_SUFFIXES, _SCHOOL_SUFFIXES):
+        if any(suffix in stripped for suffix in suffix_list):
+            return False
+    if _DEGREE.search(stripped):
+        return False
+    return True
+
+
 def _facts_for_block(block: DocumentBlock) -> list[ExtractedFact]:
     text = block.text
     lines = [line.text for line in block.lines if line.text]
-    facts: list[ExtractedFact] = []
 
+    candidates: list[ExtractedFact] = []
     if _is_education(text, block):
-        facts.append(_education_fact(block, lines))
+        candidates.append(_education_fact(block, lines))
     if _is_experience(text, block):
-        facts.append(_experience_fact(block, lines))
+        candidates.append(_experience_fact(block, lines))
     if _is_project(text, block):
-        facts.append(_project_fact(block, lines))
+        candidates.append(_project_fact(block, lines))
     if _is_publication(text, block):
-        facts.append(_simple_fact("publications", _build_publication(text), block, strong=True))
+        candidates.append(_simple_fact("publications", _build_publication(text), block, strong=True))
     if _is_teaching(text, block):
-        facts.append(_simple_fact("teaching", _build_teaching(text), block, strong=True))
+        candidates.append(_simple_fact("teaching", _build_teaching(text), block, strong=True))
     if _is_award(text, block):
-        facts.append(_simple_fact("awards", _build_award(text), block, strong=True))
+        candidates.append(_simple_fact("awards", _build_award(text), block, strong=True))
     if _is_certificate(text, block):
-        facts.append(_certificate_fact(block))
+        candidates.append(_certificate_fact(block))
     if _is_language(text, block):
-        facts.append(_language_fact(block))
+        candidates.append(_language_fact(block))
+
+    primary = _best_primary(candidates)
+
+    facts: list[ExtractedFact] = []
+    if primary is not None:
+        facts.append(primary)
 
     skills = extract_skills(text)
     if skills and (block.section_hint == "skills" or _is_skill_line(text) or facts):
@@ -108,6 +192,21 @@ def _facts_for_block(block: DocumentBlock) -> list[ExtractedFact]:
             facts.append(_skill_fact(skill, block, strong=block.section_hint == "skills" or _is_skill_line(text) or bool(facts)))
 
     return facts
+
+
+def _best_primary(candidates: list[ExtractedFact]) -> ExtractedFact | None:
+    if not candidates:
+        return None
+    if len(candidates) == 1:
+        return candidates[0]
+    best = candidates[0]
+    for candidate in candidates[1:]:
+        if candidate.confidence > best.confidence:
+            best = candidate
+        elif candidate.confidence == best.confidence:
+            if _PRIORITY_INDEX.get(candidate.collection, 999) < _PRIORITY_INDEX.get(best.collection, 999):
+                best = candidate
+    return best
 
 
 def _is_education(text: str, block: DocumentBlock) -> bool:
@@ -119,8 +218,6 @@ def _is_education(text: str, block: DocumentBlock) -> bool:
 def _is_experience(text: str, block: DocumentBlock) -> bool:
     if block.section_hint == "experiences":
         return True
-    if _is_education(text, block) or _is_project(text, block):
-        return False
     return _has_any(text, _ORG_SUFFIXES) and _has_any(text, _ROLE_SUFFIXES)
 
 
@@ -178,6 +275,7 @@ def _experience_fact(block: DocumentBlock, lines: list[str]) -> ExtractedFact:
         core_entity=bool(fields.get("organization")),
         role_or_degree=bool(fields.get("role")),
         highlight=bool(fields.get("highlights")),
+        strong_match=bool(fields.get("organization") and fields.get("role")),
     )
 
 

@@ -434,6 +434,7 @@ class ImportMeta(BaseModel):
 
 
 class ProfileImportOut(BaseModel):
+    basics: dict[str, str] = Field(default_factory=dict)
     education: list[dict[str, Any]] = Field(default_factory=list)
     experiences: list[dict[str, Any]] = Field(default_factory=list)
     projects: list[dict[str, Any]] = Field(default_factory=list)

@@ -20,7 +20,8 @@ export function mergeImportSelection(
   preview: ProfileImportResult,
   selectedKeys: ReadonlySet<string>,
   collections: readonly (keyof Profile)[],
-  makeId: (prefix: string) => string
+  makeId: (prefix: string) => string,
+  selectedBasics?: Record<string, string>
 ): MergeResult {
   const next: Profile = { ...profile };
   let accepted = 0;
@@ -43,6 +44,11 @@ export function mergeImportSelection(
     accepted += 1;
     next[collection] = [...((next[collection] as Item[] | undefined) ?? []), item] as never;
   });
+
+  if (selectedBasics && Object.keys(selectedBasics).length > 0) {
+    next.basics = { ...(next.basics ?? {}), ...selectedBasics };
+    accepted += Object.keys(selectedBasics).length;
+  }
 
   return { profile: next, accepted };
 }
