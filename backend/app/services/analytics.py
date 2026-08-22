@@ -126,7 +126,8 @@ def _parser_quality_payload(parser_stats: dict[str, dict[str, Any]]) -> list[dic
     for parser_name, stats in parser_stats.items():
         jobs = stats["jobs"]
         average_confidence = round(stats["confidence_sum"] / jobs, 2) if jobs else 0.0
-        review_status = _review_status(stats, average_confidence)
+        low_confidence_ratio = (stats["low_confidence_jobs"] / jobs) if jobs else 0.0
+        review_status = _review_status(stats, average_confidence, low_confidence_ratio)
         payload.append(
             {
                 "parser_name": parser_name,
@@ -150,10 +151,15 @@ def _parser_quality_payload(parser_stats: dict[str, dict[str, Any]]) -> list[dic
     )
 
 
-def _review_status(stats: dict[str, Any], average_confidence: float) -> str:
-    if stats["failed_attachment_events"] or stats["low_confidence_jobs"]:
+def _review_status(stats: dict[str, Any], average_confidence: float, low_confidence_ratio: float) -> str:
+    # PRD 4.6: review = attachment parse failures in the snapshot.
+    # (The PRD's "3 consecutive days of failures / sustained decline" needs a
+    #  daily health-snapshot table — out of scope; single-snapshot failure
+    #  count is the MVP proxy. See exclusions.)
+    if stats["failed_attachment_events"] > 0:
         return "review"
-    if average_confidence < 0.8:
+    # watch = avg confidence < 0.7 OR low-confidence share > 20%.
+    if average_confidence < 0.7 or low_confidence_ratio > 0.2:
         return "watch"
     return "stable"
 

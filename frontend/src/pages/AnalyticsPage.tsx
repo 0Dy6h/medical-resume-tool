@@ -72,6 +72,7 @@ export function AnalyticsPage() {
         <DataBar title="岗位大类" items={summary?.job_categories ?? []} />
         <DataBar title="学历要求" items={summary?.education_levels ?? []} />
         <DataBar title="机构类型" items={summary?.institution_types ?? []} />
+        <DataBar title="地区分布" items={summary?.regions ?? []} />
         <DataBar title="共性能力" items={summary?.common_capabilities ?? []} />
       </div>
 

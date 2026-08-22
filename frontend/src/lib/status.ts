@@ -7,7 +7,7 @@ const labels: Record<string, string> = {
   partial: "部分完成",
   completed_with_errors: "部分完成",
   review: "需复核",
-  watch: "观察",
+  watch: "需关注",
   stable: "稳定",
   saved: "已收藏",
   evaluating: "评估中",

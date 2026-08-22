@@ -15,7 +15,7 @@ describe("status helpers", () => {
   it("labels parser review states for quality dashboards", () => {
     expect(statusLabel("review")).toBe("需复核");
     expect(statusTone("review")).toBe("danger");
-    expect(statusLabel("watch")).toBe("观察");
+    expect(statusLabel("watch")).toBe("需关注");
     expect(statusTone("watch")).toBe("working");
     expect(statusLabel("stable")).toBe("稳定");
     expect(statusTone("stable")).toBe("success");
