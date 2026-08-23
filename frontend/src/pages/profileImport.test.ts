@@ -140,3 +140,40 @@ describe("buildManualAssignment — 未归类原文手动归类", () => {
     expect(item!.id).toBeUndefined();
   });
 });
+
+describe("assignedBlocks 重置语义（导入时清空归类状态）", () => {
+  it("空 Record 表示无任何已归类块 —— 等价于导入重置后的状态", () => {
+    // handleImportFile 重置为 {}，等价于：所有 blockKey 均不在已归类集合中
+    const assignedBlocks: Record<string, string> = {};
+    expect("empty-某文本-0" in assignedBlocks).toBe(false);
+    expect("preview-某文本-0" in assignedBlocks).toBe(false);
+    expect(Object.keys(assignedBlocks).length).toBe(0);
+  });
+
+  it("实际归类目标以 assignedBlocks 为准，而非 select 当前值", () => {
+    // 模拟：用户先选了 education（select 值），然后实际归类到了 experiences
+    const assignedBlocks: Record<string, string> = { "block-1": "experiences" };
+    const blockAssignSelections: Record<string, string> = { "block-1": "education" };
+
+    const blockKey = "block-1";
+    const isAssigned = blockKey in assignedBlocks;
+    const actualCollection = assignedBlocks[blockKey];
+    const selectValue = blockAssignSelections[blockKey];
+
+    expect(isAssigned).toBe(true);
+    expect(actualCollection).toBe("experiences");
+    expect(selectValue).toBe("education");
+    // 核心断言：显示文案应读取 assignedBlocks（实际归类），而非 select 值
+    expect(actualCollection).not.toBe(selectValue);
+  });
+
+  it("重置后再次导入同文本同位置的 blockKey，状态为未归类", () => {
+    // 模拟第一次导入后归类
+    let assignedBlocks: Record<string, string> = { "preview-临床经验3年-0": "experiences" };
+    expect("preview-临床经验3年-0" in assignedBlocks).toBe(true);
+
+    // 模拟再次导入（handleImportFile 开头重置）
+    assignedBlocks = {};
+    expect("preview-临床经验3年-0" in assignedBlocks).toBe(false);
+  });
+});

@@ -230,6 +230,60 @@ export function importExtractionEmpty(result: ProfileImportResult): boolean {
   return !hasBasics;
 }
 
+type UnassignedBlockRowProps = {
+  block: { text: string };
+  blockKey: string;
+  assignedBlocks: Record<string, string>;
+  blockAssignSelections: Record<string, string>;
+  onAssign: (blockKey: string, text: string, collection: string) => void;
+  onSelectionChange: (blockKey: string, collection: string) => void;
+};
+
+function UnassignedBlockRow({
+  block,
+  blockKey,
+  assignedBlocks,
+  blockAssignSelections,
+  onAssign,
+  onSelectionChange,
+}: UnassignedBlockRowProps) {
+  const isAssigned = blockKey in assignedBlocks;
+  const selectedCollection = blockAssignSelections[blockKey] ?? "education";
+  const assignedCollection = assignedBlocks[blockKey];
+  const assignedConfig = isAssigned
+    ? configByKey.get(assignedCollection as keyof Profile)
+    : null;
+  return (
+    <div className="gap-card" key={blockKey}>
+      <div className="unassigned-text">{block.text}</div>
+      {isAssigned ? (
+        <div className="unassigned-assigned">
+          已归类到 {assignedConfig?.title ?? assignedCollection}
+        </div>
+      ) : (
+        <div className="button-row unassigned-actions">
+          <select
+            value={selectedCollection}
+            onChange={(e) => onSelectionChange(blockKey, e.target.value)}
+            disabled={isAssigned}
+          >
+            {configs.map((cfg) => (
+              <option key={String(cfg.key)} value={String(cfg.key)}>{cfg.title}</option>
+            ))}
+          </select>
+          <button
+            className="text-button"
+            onClick={() => onAssign(blockKey, block.text, selectedCollection)}
+            disabled={isAssigned}
+          >
+            归类
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function ProfilePage() {
   const toast = useToast();
   const [profile, setProfile] = useState<Profile>(emptyProfile);
@@ -242,7 +296,7 @@ export function ProfilePage() {
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
   const [deleteConfirm, setDeleteConfirm] = useState<{ config: CollectionConfig; index: number; count: number } | null>(null);
   const [overlapConfirm, setOverlapConfirm] = useState(false);
-  const [assignedBlocks, setAssignedBlocks] = useState<Set<string>>(new Set());
+  const [assignedBlocks, setAssignedBlocks] = useState<Record<string, string>>({});
   const [blockAssignSelections, setBlockAssignSelections] = useState<Record<string, string>>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
   const basicFormRef = useRef<HTMLElement>(null);
@@ -323,6 +377,8 @@ export function ProfilePage() {
     if (!file) return;
     setImporting(true);
     setImportError(null);
+    setAssignedBlocks({});
+    setBlockAssignSelections({});
     try {
       const result = await api.importProfile(file);
       const keys = new Set<string>();
@@ -409,11 +465,10 @@ export function ProfilePage() {
         item
       ]
     }));
-    setAssignedBlocks((current) => {
-      const next = new Set(current);
-      next.add(blockKey);
-      return next;
-    });
+    setAssignedBlocks((current) => ({
+      ...current,
+      [blockKey]: collection,
+    }));
     // Expand target section and scroll to it
     setCollapsedSections((current) => {
       const next = new Set(current);
@@ -542,41 +597,19 @@ export function ProfilePage() {
             <details className="unassigned-blocks">
               <summary>未归类原文（{preview.unassigned_blocks?.length ?? 0}）</summary>
               <div className="compact-list">
-                {preview.unassigned_blocks?.map((block, index) => {
-                  const blockKey = `empty-${block.text}-${index}`;
-                  const isAssigned = assignedBlocks.has(blockKey);
-                  const selectedCollection = blockAssignSelections[blockKey] ?? "education";
-                  const assignedConfig = isAssigned ? configByKey.get(selectedCollection as keyof Profile) : null;
-                  return (
-                    <div className="gap-card" key={blockKey}>
-                      <div className="unassigned-text">{block.text}</div>
-                      {isAssigned ? (
-                        <div className="unassigned-assigned">
-                          已归类到 {assignedConfig?.title ?? selectedCollection}
-                        </div>
-                      ) : (
-                        <div className="button-row unassigned-actions">
-                          <select
-                            value={selectedCollection}
-                            onChange={(e) => setBlockAssignSelections((curr) => ({ ...curr, [blockKey]: e.target.value }))}
-                            disabled={isAssigned}
-                          >
-                            {configs.map((cfg) => (
-                              <option key={String(cfg.key)} value={String(cfg.key)}>{cfg.title}</option>
-                            ))}
-                          </select>
-                          <button
-                            className="text-button"
-                            onClick={() => assignBlockToCollection(blockKey, block.text, selectedCollection)}
-                            disabled={isAssigned}
-                          >
-                            归类
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
+                {preview.unassigned_blocks?.map((block, index) => (
+                  <UnassignedBlockRow
+                    key={`empty-${block.text}-${index}`}
+                    block={block}
+                    blockKey={`empty-${block.text}-${index}`}
+                    assignedBlocks={assignedBlocks}
+                    blockAssignSelections={blockAssignSelections}
+                    onAssign={assignBlockToCollection}
+                    onSelectionChange={(key, value) =>
+                      setBlockAssignSelections((curr) => ({ ...curr, [key]: value }))
+                    }
+                  />
+                ))}
               </div>
             </details>
           )}
@@ -680,41 +713,19 @@ export function ProfilePage() {
             <details className="unassigned-blocks">
               <summary>未归类原文（{preview.unassigned_blocks?.length ?? 0}）</summary>
               <div className="compact-list">
-                {preview.unassigned_blocks?.map((block, index) => {
-                  const blockKey = `preview-${block.text}-${index}`;
-                  const isAssigned = assignedBlocks.has(blockKey);
-                  const selectedCollection = blockAssignSelections[blockKey] ?? "education";
-                  const assignedConfig = isAssigned ? configByKey.get(selectedCollection as keyof Profile) : null;
-                  return (
-                    <div className="gap-card" key={blockKey}>
-                      <div className="unassigned-text">{block.text}</div>
-                      {isAssigned ? (
-                        <div className="unassigned-assigned">
-                          已归类到 {assignedConfig?.title ?? selectedCollection}
-                        </div>
-                      ) : (
-                        <div className="button-row unassigned-actions">
-                          <select
-                            value={selectedCollection}
-                            onChange={(e) => setBlockAssignSelections((curr) => ({ ...curr, [blockKey]: e.target.value }))}
-                            disabled={isAssigned}
-                          >
-                            {configs.map((cfg) => (
-                              <option key={String(cfg.key)} value={String(cfg.key)}>{cfg.title}</option>
-                            ))}
-                          </select>
-                          <button
-                            className="text-button"
-                            onClick={() => assignBlockToCollection(blockKey, block.text, selectedCollection)}
-                            disabled={isAssigned}
-                          >
-                            归类
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
+                {preview.unassigned_blocks?.map((block, index) => (
+                  <UnassignedBlockRow
+                    key={`preview-${block.text}-${index}`}
+                    block={block}
+                    blockKey={`preview-${block.text}-${index}`}
+                    assignedBlocks={assignedBlocks}
+                    blockAssignSelections={blockAssignSelections}
+                    onAssign={assignBlockToCollection}
+                    onSelectionChange={(key, value) =>
+                      setBlockAssignSelections((curr) => ({ ...curr, [key]: value }))
+                    }
+                  />
+                ))}
               </div>
             </details>
           )}

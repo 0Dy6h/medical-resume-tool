@@ -7,8 +7,6 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Annotated
 
-logger = logging.getLogger(__name__)
-
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -91,6 +89,7 @@ from app.services.resume import (
 )
 from app.services.scheduler import SubscriptionScheduler
 
+logger = logging.getLogger(__name__)
 
 DEFAULT_DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./data/app.db")
 
