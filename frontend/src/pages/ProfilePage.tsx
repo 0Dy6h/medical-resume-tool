@@ -195,6 +195,27 @@ function blankItem(config: CollectionConfig): Record<string, unknown> {
   return item;
 }
 
+/**
+ * Build a blank collection item from an unassigned text block, placing the
+ * trimmed text into the collection's primary (first) field.
+ *
+ * The function does NOT generate an id — callers use newId() to assign one,
+ * consistent with how importMerge treats newly merged rows. Only the primary
+ * field is populated; everything else stays blank so the user fills in the
+ * rest in the normal profile form. Unknown collections return null.
+ */
+export function buildManualAssignment(collection: string, text: string): Record<string, unknown> | null {
+  const config = configByKey.get(collection as keyof Profile);
+  if (!config) return null;
+  const item: Record<string, unknown> = {};
+  for (const field of config.fields) {
+    item[field.key] = field.area ? [] : "";
+  }
+  const primaryKey = config.fields[0].key;
+  item[primaryKey] = text.trim();
+  return item;
+}
+
 export function importExtractionEmpty(result: ProfileImportResult): boolean {
   const hasCollection = collectionKeys.some((key) => {
     const arr = result[key as keyof ProfileImportResult] as Array<Record<string, unknown>> | undefined;
@@ -221,8 +242,11 @@ export function ProfilePage() {
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
   const [deleteConfirm, setDeleteConfirm] = useState<{ config: CollectionConfig; index: number; count: number } | null>(null);
   const [overlapConfirm, setOverlapConfirm] = useState(false);
+  const [assignedBlocks, setAssignedBlocks] = useState<Set<string>>(new Set());
+  const [blockAssignSelections, setBlockAssignSelections] = useState<Record<string, string>>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
   const basicFormRef = useRef<HTMLElement>(null);
+  const sectionRefs = useRef<Record<string, HTMLElement | null>>({});
 
   const currentMode: "fresh_grad" | "experienced" = profile.mode ?? "experienced";
 
@@ -372,6 +396,36 @@ export function ProfilePage() {
     }));
   }
 
+  function assignBlockToCollection(blockKey: string, text: string, collection: string) {
+    const item = buildManualAssignment(collection, text);
+    if (!item) return;
+    const config = configByKey.get(collection as keyof Profile);
+    if (!config) return;
+    item.id = newId(String(config.key));
+    setProfile((current) => ({
+      ...current,
+      [config.key]: [
+        ...((current[config.key] as Array<Record<string, unknown>>) ?? []),
+        item
+      ]
+    }));
+    setAssignedBlocks((current) => {
+      const next = new Set(current);
+      next.add(blockKey);
+      return next;
+    });
+    // Expand target section and scroll to it
+    setCollapsedSections((current) => {
+      const next = new Set(current);
+      next.delete(String(config.key));
+      return next;
+    });
+    window.setTimeout(() => {
+      sectionRefs.current[String(config.key)]?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 50);
+    toast.success(`已归类到${config.title}，请补全字段后点击保存`);
+  }
+
   async function removeItem(config: CollectionConfig, index: number) {
     const items = profile[config.key] as Array<Record<string, unknown>>;
     const item = items[index];
@@ -488,15 +542,45 @@ export function ProfilePage() {
             <details className="unassigned-blocks">
               <summary>未归类原文（{preview.unassigned_blocks?.length ?? 0}）</summary>
               <div className="compact-list">
-                {preview.unassigned_blocks?.map((block, index) => (
-                  <div className="gap-card" key={`${block.text}-${index}`}>
-                    {block.text}
-                  </div>
-                ))}
+                {preview.unassigned_blocks?.map((block, index) => {
+                  const blockKey = `empty-${block.text}-${index}`;
+                  const isAssigned = assignedBlocks.has(blockKey);
+                  const selectedCollection = blockAssignSelections[blockKey] ?? "education";
+                  const assignedConfig = isAssigned ? configByKey.get(selectedCollection as keyof Profile) : null;
+                  return (
+                    <div className="gap-card" key={blockKey}>
+                      <div className="unassigned-text">{block.text}</div>
+                      {isAssigned ? (
+                        <div className="unassigned-assigned">
+                          已归类到 {assignedConfig?.title ?? selectedCollection}
+                        </div>
+                      ) : (
+                        <div className="button-row unassigned-actions">
+                          <select
+                            value={selectedCollection}
+                            onChange={(e) => setBlockAssignSelections((curr) => ({ ...curr, [blockKey]: e.target.value }))}
+                            disabled={isAssigned}
+                          >
+                            {configs.map((cfg) => (
+                              <option key={String(cfg.key)} value={String(cfg.key)}>{cfg.title}</option>
+                            ))}
+                          </select>
+                          <button
+                            className="text-button"
+                            onClick={() => assignBlockToCollection(blockKey, block.text, selectedCollection)}
+                            disabled={isAssigned}
+                          >
+                            归类
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </details>
           )}
-          <div className="button-row" style={{ marginTop: "0.75rem" }}>
+          <div className="button-row unassigned-actions">
             <button className="primary-button" onClick={focusBasicForm}>
               手动录入
             </button>
@@ -596,11 +680,41 @@ export function ProfilePage() {
             <details className="unassigned-blocks">
               <summary>未归类原文（{preview.unassigned_blocks?.length ?? 0}）</summary>
               <div className="compact-list">
-                {preview.unassigned_blocks?.map((block, index) => (
-                  <div className="gap-card" key={`${block.text}-${index}`}>
-                    {block.text}
-                  </div>
-                ))}
+                {preview.unassigned_blocks?.map((block, index) => {
+                  const blockKey = `preview-${block.text}-${index}`;
+                  const isAssigned = assignedBlocks.has(blockKey);
+                  const selectedCollection = blockAssignSelections[blockKey] ?? "education";
+                  const assignedConfig = isAssigned ? configByKey.get(selectedCollection as keyof Profile) : null;
+                  return (
+                    <div className="gap-card" key={blockKey}>
+                      <div className="unassigned-text">{block.text}</div>
+                      {isAssigned ? (
+                        <div className="unassigned-assigned">
+                          已归类到 {assignedConfig?.title ?? selectedCollection}
+                        </div>
+                      ) : (
+                        <div className="button-row unassigned-actions">
+                          <select
+                            value={selectedCollection}
+                            onChange={(e) => setBlockAssignSelections((curr) => ({ ...curr, [blockKey]: e.target.value }))}
+                            disabled={isAssigned}
+                          >
+                            {configs.map((cfg) => (
+                              <option key={String(cfg.key)} value={String(cfg.key)}>{cfg.title}</option>
+                            ))}
+                          </select>
+                          <button
+                            className="text-button"
+                            onClick={() => assignBlockToCollection(blockKey, block.text, selectedCollection)}
+                            disabled={isAssigned}
+                          >
+                            归类
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </details>
           )}
@@ -636,7 +750,7 @@ export function ProfilePage() {
         const isCollapsed = collapsedSections.has(String(config.key));
         const items = (profile[config.key] as Array<Record<string, unknown>>) ?? [];
         return (
-          <section className="panel form-panel" key={String(config.key)}>
+          <section className="panel form-panel" key={String(config.key)} ref={(el) => { sectionRefs.current[String(config.key)] = el; }}>
             <div className="panel-head collapsible-head" onClick={() => toggleSection(String(config.key))}>
               <h2>
                 {config.title}

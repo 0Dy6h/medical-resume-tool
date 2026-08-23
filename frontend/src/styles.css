@@ -562,6 +562,21 @@ button:disabled {
   margin-bottom: 8px;
 }
 
+.unassigned-blocks .unassigned-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.unassigned-blocks .unassigned-actions {
+  margin-top: 8px;
+}
+
+.unassigned-blocks .unassigned-assigned {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 0.9em;
+}
+
 .row-meta {
   min-width: 190px;
   text-align: right;
