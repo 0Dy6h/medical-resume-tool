@@ -1290,3 +1290,149 @@ def test_diagnostic_export_marks_unlinked_items(tmp_path):
     )
     assert app.status_code == 200
     assert "用户手动添加，无档案证据" not in docx_document_xml(app.content)
+
+
+def _make_reviewed_draft(client: TestClient, auth: dict[str, str]) -> dict:
+    """Helper: create a fully-reviewed resume draft and return its payload."""
+    job = client.get("/api/jobs", params={"keyword": "科研"}).json()["items"][0]
+    client.put(
+        "/api/profile",
+        json={
+            "basics": {"name": "兜底测试"},
+            "skills": [{"id": "skill-1", "name": "SPSS"}, {"id": "skill-2", "name": "英语阅读能力良好"}],
+        },
+        headers=auth,
+    )
+    draft = client.post("/api/resume-drafts", json={"job_id": job["id"]}, headers=auth).json()
+    sections = draft["sections"]
+    for section in sections:
+        for item in section["items"]:
+            item["decision"] = "adopt"
+    client.put(f"/api/resume-drafts/{draft['id']}", json={"sections": sections}, headers=auth)
+    return draft
+
+
+def test_export_docx_failure_returns_500_with_user_friendly_message(tmp_path, monkeypatch, caplog):
+    """PRD 4.5: DOCX 生成异常 → 500 + 友好文案 + 后台 ERROR 日志。"""
+    from app import main as main_module
+
+    client = make_client(tmp_path)
+    auth = auth_headers(client)
+    crawl_and_wait(client, [1])
+    draft = _make_reviewed_draft(client, auth)
+
+    def _boom(*args, **kwargs):  # noqa: ANN002, ANN003
+        raise RuntimeError("simulated docx export failure")
+
+    monkeypatch.setattr(main_module, "export_docx", _boom)
+
+    resp = client.post(
+        f"/api/resume-drafts/{draft['id']}/export",
+        params={"format": "docx", "override": True},
+        headers=auth,
+    )
+
+    assert resp.status_code == 500
+    assert resp.json()["detail"] == "文件生成失败，请稍后重试"
+
+    # 后台日志：ERROR 级别 + 包含堆栈信息 + 包含 draft_id 和 format
+    error_records = [r for r in caplog.records if r.levelname == "ERROR"]
+    assert error_records, "expected ERROR-level log records"
+    full_text = "\n".join(r.getMessage() for r in caplog.records) + "\n" + "".join(
+        r.exc_text or "" for r in caplog.records if r.exc_text
+    )
+    assert str(draft["id"]) in full_text, "log should contain draft_id"
+    assert "docx" in full_text.lower(), "log should contain format"
+    assert "simulated docx export failure" in full_text, "log should contain the exception message"
+    assert "RuntimeError" in full_text or any(
+        r.exc_info is not None for r in caplog.records
+    ), "log should contain stack trace"
+
+
+def test_export_pdf_failure_returns_500_with_user_friendly_message(tmp_path, monkeypatch, caplog):
+    """PRD 4.5: PDF 生成异常 → 500 + 友好文案 + 后台 ERROR 日志。"""
+    from app import main as main_module
+
+    client = make_client(tmp_path)
+    auth = auth_headers(client)
+    crawl_and_wait(client, [1])
+    draft = _make_reviewed_draft(client, auth)
+
+    def _boom(*args, **kwargs):  # noqa: ANN002, ANN003
+        raise RuntimeError("simulated pdf export failure")
+
+    monkeypatch.setattr(main_module, "export_pdf", _boom)
+
+    resp = client.post(
+        f"/api/resume-drafts/{draft['id']}/export",
+        params={"format": "pdf", "override": True},
+        headers=auth,
+    )
+
+    assert resp.status_code == 500
+    assert resp.json()["detail"] == "文件生成失败，请稍后重试"
+
+    error_records = [r for r in caplog.records if r.levelname == "ERROR"]
+    assert error_records, "expected ERROR-level log records"
+    full_text = "\n".join(r.getMessage() for r in caplog.records) + "\n" + "".join(
+        r.exc_text or "" for r in caplog.records if r.exc_text
+    )
+    assert str(draft["id"]) in full_text, "log should contain draft_id"
+    assert "pdf" in full_text.lower(), "log should contain format"
+    assert "simulated pdf export failure" in full_text
+
+
+def test_export_unreviewed_409_not_swallowed_by_fallback(tmp_path):
+    """Regression: 未审阅 409 不能被异常兜底吞成 500。"""
+    client = make_client(tmp_path)
+    auth = auth_headers(client)
+    crawl_and_wait(client, [1])
+    job = client.get("/api/jobs", params={"keyword": "科研"}).json()["items"][0]
+    client.put(
+        "/api/profile",
+        json={
+            "basics": {"name": "测试"},
+            "skills": [{"id": "skill-1", "name": "SPSS"}, {"id": "skill-2", "name": "英语阅读能力良好"}],
+        },
+        headers=auth,
+    )
+    draft = client.post("/api/resume-drafts", json={"job_id": job["id"]}, headers=auth).json()
+
+    resp = client.post(
+        f"/api/resume-drafts/{draft['id']}/export",
+        params={"format": "docx"},
+        headers=auth,
+    )
+    assert resp.status_code == 409
+    assert "尚未审阅" in resp.json()["detail"]
+
+
+def test_export_empty_422_not_swallowed_by_fallback(tmp_path):
+    """Regression: 空内容 422 不能被异常兜底吞成 500。"""
+    client = make_client(tmp_path)
+    auth = auth_headers(client)
+    crawl_and_wait(client, [1])
+    job = client.get("/api/jobs", params={"keyword": "科研"}).json()["items"][0]
+    client.put(
+        "/api/profile",
+        json={
+            "basics": {"name": "空导出"},
+            "skills": [{"id": "skill-1", "name": "SPSS"}, {"id": "skill-2", "name": "英语阅读能力良好"}],
+        },
+        headers=auth,
+    )
+    draft = client.post("/api/resume-drafts", json={"job_id": job["id"]}, headers=auth).json()
+
+    sections = draft["sections"]
+    for section in sections:
+        for item in section["items"]:
+            item["decision"] = "remove"
+    client.put(f"/api/resume-drafts/{draft['id']}", json={"sections": sections}, headers=auth)
+
+    resp = client.post(
+        f"/api/resume-drafts/{draft['id']}/export",
+        params={"format": "docx", "override": True},
+        headers=auth,
+    )
+    assert resp.status_code == 422
+    assert "为空" in resp.json()["detail"]

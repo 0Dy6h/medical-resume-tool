@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import logging
 import os
 import threading
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Annotated
+
+logger = logging.getLogger(__name__)
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -455,13 +458,23 @@ def create_app(database_url: str | None = None) -> FastAPI:
 
         include_appendix = mode == "diagnostic"
         if format == "docx":
+            try:
+                content = export_docx(export_draft, include_appendix=include_appendix)
+            except Exception:
+                logger.exception("export_docx failed (draft_id=%s, format=%s)", draft_id, format)
+                raise HTTPException(status_code=500, detail="文件生成失败，请稍后重试") from None
             return Response(
-                content=export_docx(export_draft, include_appendix=include_appendix),
+                content=content,
                 media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                 headers={"Content-Disposition": f'attachment; filename="resume-{draft_id}.docx"'},
             )
+        try:
+            content = export_pdf(export_draft, include_appendix=include_appendix)
+        except Exception:
+            logger.exception("export_pdf failed (draft_id=%s, format=%s)", draft_id, format)
+            raise HTTPException(status_code=500, detail="文件生成失败，请稍后重试") from None
         return Response(
-            content=export_pdf(export_draft, include_appendix=include_appendix),
+            content=content,
             media_type="application/pdf",
             headers={"Content-Disposition": f'attachment; filename="resume-{draft_id}.pdf"'},
         )
