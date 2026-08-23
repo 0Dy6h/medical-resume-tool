@@ -151,20 +151,44 @@ def create_app(database_url: str | None = None) -> FastAPI:
 
     @app.get("/api/institutions", response_model=list[InstitutionOut])
     def institutions(engine: Annotated[DatabaseEngine, Depends(get_engine)]) -> list[dict]:
-        return list_institutions(engine)
+        from app.services.seeds import BLOCKED_REASONS
+        items = list_institutions(engine)
+        for item in items:
+            if item["enabled"]:
+                item["blocked_reason"] = None
+            else:
+                item["blocked_reason"] = BLOCKED_REASONS.get(item["id"], "尚未适配该站点，暂未启用")
+        return items
 
     @app.post("/api/crawl-runs", response_model=CrawlRunOut, status_code=201)
     def start_crawl(payload: CrawlRunCreate, engine: Annotated[DatabaseEngine, Depends(get_engine)]) -> dict:
         from app.config import config
+        from app.services.seeds import BLOCKED_REASONS
         institutions_to_crawl = get_institutions_by_ids(engine, payload.institution_ids)
         if not institutions_to_crawl:
             raise HTTPException(status_code=404, detail="没有找到可抓取的机构")
-        run_id = create_crawl_run(engine, [item["id"] for item in institutions_to_crawl])
+
+        # Guard: filter out disabled (not adapted) institutions
+        adapted_institutions = [inst for inst in institutions_to_crawl if inst["enabled"]]
+        skipped_institutions = [inst for inst in institutions_to_crawl if not inst["enabled"]]
+
+        if skipped_institutions and not adapted_institutions:
+            raise HTTPException(status_code=400, detail="所选机构均尚未适配，无法抓取")
+
+        if skipped_institutions:
+            for inst in skipped_institutions:
+                reason = BLOCKED_REASONS.get(inst["id"], "尚未适配该站点，暂未启用")
+                logger.info(
+                    "Skipping disabled institution id=%s name=%s reason=%s",
+                    inst["id"], inst["name"], reason,
+                )
+
+        run_id = create_crawl_run(engine, [item["id"] for item in adapted_institutions])
 
         def _crawl_then_scan() -> None:
             try:
                 execute_crawl_run(
-                    engine, run_id, institutions_to_crawl, config.crawl_delay_seconds
+                    engine, run_id, adapted_institutions, config.crawl_delay_seconds
                 )
             finally:
                 scan_subscriptions(engine, datetime.now(timezone.utc))

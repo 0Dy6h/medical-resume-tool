@@ -10,6 +10,7 @@ export type Institution = {
   last_crawled_at?: string | null;
   last_status?: string | null;
   last_error?: string | null;
+  blocked_reason?: string | null;
 };
 
 export type CrawlRun = {

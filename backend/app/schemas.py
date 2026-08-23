@@ -302,6 +302,7 @@ class InstitutionOut(BaseModel):
     last_crawled_at: str | None = None
     last_status: str | None = None
     last_error: str | None = None
+    blocked_reason: str | None = None
 
 
 class CrawlRunCreate(BaseModel):

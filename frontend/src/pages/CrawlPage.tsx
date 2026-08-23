@@ -8,6 +8,26 @@ import type { CrawlRun, Institution } from "../types";
 
 const TERMINAL_STATUSES = new Set(["completed", "partial", "failed"]);
 
+/**
+ * Compute adaptation coverage from an institution list.
+ *
+ * Pure function — safe to test directly. Returns the count of enabled
+ * (adapted) institutions and the total count of all institutions.
+ */
+export function adaptationCoverage(institutions: Institution[]): { adapted: number; total: number } {
+  const adapted = institutions.filter((item) => item.enabled).length;
+  return { adapted, total: institutions.length };
+}
+
+/**
+ * Compute the set of all adapted (enabled) institution IDs.
+ *
+ * Pure function — used by "全选" to exclude non-adapted institutions.
+ */
+export function allAdaptedIds(institutions: Institution[]): Set<number> {
+  return new Set(institutions.filter((item) => item.enabled).map((item) => item.id));
+}
+
 export function CrawlPage() {
   const toast = useToast();
   const [institutions, setInstitutions] = useState<Institution[]>([]);
@@ -33,6 +53,7 @@ export function CrawlPage() {
 
   const selectedIds = useMemo(() => Array.from(selected).sort((a, b) => a - b), [selected]);
   const crawling = loading || (run !== null && !TERMINAL_STATUSES.has(run.status));
+  const coverage = useMemo(() => adaptationCoverage(institutions), [institutions]);
 
   function poll(runId: number) {
     if (pollRef.current) window.clearInterval(pollRef.current);
@@ -84,7 +105,7 @@ export function CrawlPage() {
   }
 
   function selectAll() {
-    setSelected(new Set(institutions.map((item) => item.id)));
+    setSelected(allAdaptedIds(institutions));
   }
 
   function selectNone() {
@@ -92,10 +113,14 @@ export function CrawlPage() {
   }
 
   function selectEnabled() {
-    setSelected(new Set(institutions.filter((item) => item.enabled).map((item) => item.id)));
+    setSelected(allAdaptedIds(institutions));
   }
 
-  const allSelected = institutions.length > 0 && selected.size === institutions.length;
+  const allAdaptedSelected = useMemo(() => {
+    const adapted = institutions.filter((item) => item.enabled);
+    if (adapted.length === 0) return false;
+    return adapted.every((item) => selected.has(item.id));
+  }, [institutions, selected]);
 
   return (
     <div className="page-stack">
@@ -146,7 +171,10 @@ export function CrawlPage() {
 
       <section className="panel table-panel">
         <div className="panel-head">
-          <h2>机构种子</h2>
+          <div>
+            <h2>机构种子</h2>
+            <p className="subtle">机构覆盖：{coverage.adapted}/{coverage.total} 已适配</p>
+          </div>
           <div className="button-row">
             <button className="text-button" onClick={selectEnabled}>仅已启用</button>
             <button className="text-button" onClick={selectAll}>全选</button>
@@ -158,8 +186,8 @@ export function CrawlPage() {
           <thead>
             <tr>
               <th>
-                <button className="icon-button small" onClick={allSelected ? selectNone : selectAll} title="全选/全不选">
-                  {allSelected ? <CheckSquare size={17} /> : <Square size={17} />}
+                <button className="icon-button small" onClick={allAdaptedSelected ? selectNone : selectAll} title="全选/全不选（仅已适配机构）">
+                  {allAdaptedSelected ? <CheckSquare size={17} /> : <Square size={17} />}
                 </button>
               </th>
               <th>机构</th>
@@ -171,35 +199,52 @@ export function CrawlPage() {
             </tr>
           </thead>
           <tbody>
-            {institutions.map((item) => (
-              <tr key={item.id}>
-                <td>
-                  <button className="icon-button small" onClick={() => toggle(item.id)} title="选择">
-                    {selected.has(item.id) ? <CheckSquare size={17} /> : <Square size={17} />}
-                  </button>
-                </td>
-                <td>
-                  <a href={item.official_url} target="_blank" rel="noreferrer">
-                    {item.name}
-                  </a>
-                </td>
-                <td>{item.institution_type}</td>
-                <td>{item.region}</td>
-                <td>
-                  <div className="status-cell">
-                    <span>{item.crawl_strategy}</span>
-                    {isDemoStrategy(item.crawl_strategy) && <span className="tag">演示数据</span>}
-                  </div>
-                </td>
-                <td>
-                  <div className="status-cell">
-                    <StatusPill value={item.last_status} />
-                    {item.last_error && <span className="status-error">{item.last_error}</span>}
-                  </div>
-                </td>
-                <td>{formatDate(item.last_crawled_at)}</td>
-              </tr>
-            ))}
+            {institutions.map((item) => {
+              const isDisabled = !item.enabled;
+              return (
+                <tr key={item.id}>
+                  <td>
+                    <button
+                      className="icon-button small"
+                      onClick={() => !isDisabled && toggle(item.id)}
+                      disabled={isDisabled}
+                      title={isDisabled ? item.blocked_reason ?? "尚未适配该站点，暂未启用" : "选择"}
+                    >
+                      {selected.has(item.id) ? <CheckSquare size={17} /> : <Square size={17} />}
+                    </button>
+                  </td>
+                  <td>
+                    <a href={item.official_url} target="_blank" rel="noreferrer">
+                      {item.name}
+                    </a>
+                  </td>
+                  <td>{item.institution_type}</td>
+                  <td>{item.region}</td>
+                  <td>
+                    <div className="status-cell">
+                      <span>{item.crawl_strategy}</span>
+                      {isDemoStrategy(item.crawl_strategy) && <span className="tag">演示数据</span>}
+                      {isDisabled && <span className="tag">未适配</span>}
+                    </div>
+                  </td>
+                  <td>
+                    <div className="status-cell">
+                      {isDisabled ? (
+                        <span className="status-error">
+                          {item.blocked_reason ?? "尚未适配该站点，暂未启用"}
+                        </span>
+                      ) : (
+                        <>
+                          <StatusPill value={item.last_status} />
+                          {item.last_error && <span className="status-error">{item.last_error}</span>}
+                        </>
+                      )}
+                    </div>
+                  </td>
+                  <td>{formatDate(item.last_crawled_at)}</td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </section>
