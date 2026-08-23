@@ -195,6 +195,20 @@ function blankItem(config: CollectionConfig): Record<string, unknown> {
   return item;
 }
 
+export function importExtractionEmpty(result: ProfileImportResult): boolean {
+  const hasCollection = collectionKeys.some((key) => {
+    const arr = result[key as keyof ProfileImportResult] as Array<Record<string, unknown>> | undefined;
+    return arr != null && arr.length > 0;
+  });
+  if (hasCollection) return false;
+
+  if ((result.review_items ?? []).length > 0) return false;
+
+  const basics = result.basics ?? {};
+  const hasBasics = Object.values(basics).some((v) => String(v ?? "").trim() !== "");
+  return !hasBasics;
+}
+
 export function ProfilePage() {
   const toast = useToast();
   const [profile, setProfile] = useState<Profile>(emptyProfile);
@@ -203,10 +217,12 @@ export function ProfilePage() {
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
   const [previewBasics, setPreviewBasics] = useState<Record<string, string>>({});
   const [importing, setImporting] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
   const [deleteConfirm, setDeleteConfirm] = useState<{ config: CollectionConfig; index: number; count: number } | null>(null);
   const [overlapConfirm, setOverlapConfirm] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const basicFormRef = useRef<HTMLElement>(null);
 
   const currentMode: "fresh_grad" | "experienced" = profile.mode ?? "experienced";
 
@@ -282,6 +298,7 @@ export function ProfilePage() {
     event.target.value = "";
     if (!file) return;
     setImporting(true);
+    setImportError(null);
     try {
       const result = await api.importProfile(file);
       const keys = new Set<string>();
@@ -294,16 +311,21 @@ export function ProfilePage() {
       setPreview(result);
       setSelectedKeys(keys);
       setPreviewBasics(result.basics ?? {});
-      if (keys.size === 0 && reviewCount === 0) {
+      if (keys.size === 0 && reviewCount === 0 && !importExtractionEmpty(result)) {
         toast.info("未识别出可导入的条目，请检查文档结构");
       } else if (keys.size === 0 && reviewCount > 0) {
         toast.info("有待确认条目，请在预览中勾选后导入");
       }
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "导入失败");
+      setImportError(error instanceof Error ? error.message : "导入失败");
+      setPreview(null);
     } finally {
       setImporting(false);
     }
+  }
+
+  function focusBasicForm() {
+    basicFormRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
   function toggleSelected(key: string) {
@@ -448,7 +470,41 @@ export function ProfilePage() {
         </div>
       </div>
 
-      {preview && (
+      {(importError || (preview && importExtractionEmpty(preview))) && (
+        <section className="panel form-panel">
+          <div className="panel-head">
+            <h2>导入提示</h2>
+            <button className="text-button" onClick={() => { setImportError(null); setPreview(null); }}>
+              关闭
+            </button>
+          </div>
+          <div className="gap-card">
+            无法从该文件中提取结构化信息，请尝试手动输入或上传更清晰的文件
+          </div>
+          {importError && (
+            <p className="subtle" style={{ marginTop: "0.5rem" }}>{importError}</p>
+          )}
+          {preview && (preview.unassigned_blocks ?? []).length > 0 && (
+            <details className="unassigned-blocks">
+              <summary>未归类原文（{preview.unassigned_blocks?.length ?? 0}）</summary>
+              <div className="compact-list">
+                {preview.unassigned_blocks?.map((block, index) => (
+                  <div className="gap-card" key={`${block.text}-${index}`}>
+                    {block.text}
+                  </div>
+                ))}
+              </div>
+            </details>
+          )}
+          <div className="button-row" style={{ marginTop: "0.75rem" }}>
+            <button className="primary-button" onClick={focusBasicForm}>
+              手动录入
+            </button>
+          </div>
+        </section>
+      )}
+
+      {preview && !importExtractionEmpty(preview) && !importError && (
         <section className="panel form-panel">
           <div className="panel-head">
             <h2>导入预览</h2>
@@ -551,7 +607,7 @@ export function ProfilePage() {
         </section>
       )}
 
-      <section className="panel form-panel">
+      <section className="panel form-panel" ref={basicFormRef}>
         <div className="panel-head">
           <h2>个人信息</h2>
           <span className="subtle">用于简历抬头（姓名 / 联系方式）</span>
