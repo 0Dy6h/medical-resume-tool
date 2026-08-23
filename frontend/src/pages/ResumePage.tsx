@@ -1,9 +1,9 @@
-import { CheckCircle2, ChevronLeft, ChevronRight, Download, FileDown, ListChecks, Pencil, RefreshCcw, Save, Trash2, WandSparkles } from "lucide-react";
+import { CheckCircle2, ChevronLeft, ChevronRight, Download, FileDown, History, ListChecks, Pencil, RefreshCcw, Save, Trash2, WandSparkles } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useToast } from "../components/Toast";
 import { api, downloadBlob } from "../lib/api";
 import { evidenceSourceLabel, evidenceStrengthLabel, evidenceStrengthTone } from "../lib/resumeEvidence";
-import type { Job, ResumeDraft, ResumeSection } from "../types";
+import type { Job, ResumeDraft, ResumeDraftSummary, ResumeSection } from "../types";
 
 // ── Pure helpers (exported for testing) ──────────────────────────────
 
@@ -119,6 +119,7 @@ export function ResumePage() {
   const [reviewMode, setReviewMode] = useState(false);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [editing, setEditing] = useState(false);
+  const [draftHistory, setDraftHistory] = useState<ResumeDraftSummary[]>([]);
 
   async function refreshJobs() {
     try {
@@ -147,19 +148,37 @@ export function ResumePage() {
     }
   }
 
+  async function refreshDraftHistory(jobIdToFetch: number | "") {
+    if (!jobIdToFetch) {
+      setDraftHistory([]);
+      return;
+    }
+    try {
+      setDraftHistory(await api.listResumeDrafts(Number(jobIdToFetch)));
+    } catch {
+      setDraftHistory([]);
+    }
+  }
+
   useEffect(() => {
     void refreshJobs();
     void loadPendingDraft();
   }, []);
 
+  useEffect(() => {
+    void refreshDraftHistory(jobId);
+  }, [jobId]);
+
   async function generate() {
     if (!jobId) return;
     setLoading(true);
     try {
-      setDraft(await api.createResumeDraft(Number(jobId)));
+      const newDraft = await api.createResumeDraft(Number(jobId));
+      setDraft(newDraft);
       setReviewMode(false);
       setCurrentIndex(0);
       setEditing(false);
+      void refreshDraftHistory(jobId);
       toast.success("已生成简历草稿");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "生成失败");
@@ -174,6 +193,19 @@ export function ResumePage() {
     setDraft(payload);
     setSaved(true);
     window.setTimeout(() => setSaved(false), 1500);
+    void refreshDraftHistory(jobId);
+  }
+
+  async function loadHistoricalDraft(draftId: number) {
+    try {
+      const loaded = await api.getResumeDraft(draftId);
+      setDraft(loaded);
+      setReviewMode(false);
+      setCurrentIndex(0);
+      setEditing(false);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "加载草稿失败");
+    }
   }
 
   async function exportDraft(format: "docx" | "pdf", mode: "application" | "diagnostic" = "application") {
@@ -297,6 +329,7 @@ export function ResumePage() {
       setDraft(payload);
       setReviewMode(false);
       setEditing(false);
+      void refreshDraftHistory(jobId);
       toast.success("审阅完成，草稿可导出");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "保存失败");
@@ -347,6 +380,48 @@ export function ResumePage() {
           </button>
         </div>
       </section>
+
+      {draftHistory.length > 0 && (
+        <section className="panel">
+          <div className="panel-head">
+            <h2><History size={17} /> 历史版本</h2>
+          </div>
+          <div className="compact-list">
+            {draftHistory.map((item) => (
+              <button
+                key={item.id}
+                className={`history-item${draft?.id === item.id ? " history-item-active" : ""}`}
+                onClick={() => void loadHistoricalDraft(item.id)}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  width: "100%",
+                  padding: "0.5rem 0.75rem",
+                  border: draft?.id === item.id ? "1px solid #3b82f6" : "1px solid #e5e7eb",
+                  borderRadius: "6px",
+                  marginBottom: "0.4rem",
+                  background: draft?.id === item.id ? "#eff6ff" : "transparent",
+                  cursor: "pointer",
+                  textAlign: "left",
+                }}
+              >
+                <span style={{ fontSize: "0.85rem" }}>
+                  <strong>#{item.id}</strong> {item.title}
+                </span>
+                <span style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                  <span className={`status ${item.status === "reviewed" ? "success" : "idle"}`}>
+                    {item.status === "reviewed" ? "已审阅" : "草稿"}
+                  </span>
+                  <span style={{ fontSize: "0.75rem", color: "#6b7280" }}>
+                    {item.updated_at.replace("T", " ").slice(0, 16)}
+                  </span>
+                </span>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
 
       {draft && (
         <div className="resume-layout">

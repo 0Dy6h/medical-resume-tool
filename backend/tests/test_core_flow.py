@@ -1134,3 +1134,58 @@ def test_total_mismatch_returns_422_and_blocks_draft_creation(tmp_path, monkeypa
     payload = resp.json()
     assert payload["evidence"] == []
     assert payload["gaps"] == []
+
+
+def test_resume_draft_history_list_filter_isolation_and_status(tmp_path):
+    """PRD 4.4: draft version management — list, filter, isolate, status."""
+    client = make_client(tmp_path)
+    auth = auth_headers(client)
+    auth_b = auth_headers(client, username="bob")
+    crawl_and_wait(client, [1])
+    jobs = client.get("/api/jobs").json()["items"]
+    job_a = next(j for j in jobs if j["title"] == "临床研究中心科研助理")
+
+    # ── Set up a matching profile for the research job ──
+    client.put(
+        "/api/profile",
+        json={
+            "basics": {"name": "版本测试"},
+            "education": [{"id": "edu-1", "school": "复旦大学", "degree": "硕士", "major": "临床医学"}],
+            "skills": [{"id": "skill-1", "name": "SPSS"}, {"id": "skill-2", "name": "英语阅读能力良好"}],
+        },
+        headers=auth,
+    )
+
+    # ── ① Create two drafts for the same job ──
+    d1 = client.post("/api/resume-drafts", json={"job_id": job_a["id"]}, headers=auth).json()
+    d2 = client.post("/api/resume-drafts", json={"job_id": job_a["id"]}, headers=auth).json()
+
+    # ── ② List returns 2 items, latest first ──
+    drafts = client.get("/api/resume-drafts", headers=auth).json()
+    assert len(drafts) == 2
+    assert drafts[0]["id"] == d2["id"]
+    assert drafts[1]["id"] == d1["id"]
+    for item in drafts:
+        assert set(item.keys()) == {"id", "job_id", "title", "status", "created_at", "updated_at"}
+
+    # ── ③ Job filter works ──
+    filtered = client.get("/api/resume-drafts", params={"job_id": job_a["id"]}, headers=auth).json()
+    assert len(filtered) == 2
+    assert all(item["job_id"] == job_a["id"] for item in filtered)
+
+    # ── ④ Cannot see other users' drafts ──
+    bob_drafts = client.get("/api/resume-drafts", headers=auth_b).json()
+    assert bob_drafts == []
+
+    # ── ⑤ All-adopt PUT → status reviewed ──
+    sections = d2["sections"]
+    for section in sections:
+        for item in section["items"]:
+            item["decision"] = "adopt"
+    client.put(f"/api/resume-drafts/{d2['id']}", json={"sections": sections}, headers=auth)
+
+    drafts_after = client.get("/api/resume-drafts", params={"job_id": job_a["id"]}, headers=auth).json()
+    reviewed_item = next(item for item in drafts_after if item["id"] == d2["id"])
+    assert reviewed_item["status"] == "reviewed"
+    draft_item = next(item for item in drafts_after if item["id"] == d1["id"])
+    assert draft_item["status"] == "draft"

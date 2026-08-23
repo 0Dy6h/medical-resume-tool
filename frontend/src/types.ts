@@ -206,6 +206,15 @@ export type ResumeDraft = {
   updated_at: string;
 };
 
+export type ResumeDraftSummary = {
+  id: number;
+  job_id: number;
+  title: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
+};
+
 export type Report = {
   id: number;
   title: string;

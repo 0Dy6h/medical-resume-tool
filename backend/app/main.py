@@ -31,6 +31,7 @@ from app.schemas import (
     ReportOut,
     ResumeDraftCreate,
     ResumeDraftOut,
+    ResumeDraftSummaryOut,
     ResumeDraftUpdate,
     StructuredJDOut,
     SubscriptionCreate,
@@ -69,6 +70,7 @@ from app.services.repositories import (
     list_subscriptions,
     mark_subscription_read,
     list_resume_drafts_by_user,
+    list_resume_drafts,
     save_profile,
     scan_subscriptions,
     update_resume_draft_sections,
@@ -347,6 +349,25 @@ def create_app(database_url: str | None = None) -> FastAPI:
             raise HTTPException(status_code=400, detail=str(exc)) from None
         contract = build_profile_contract(extraction.lines, extraction.warnings)
         return contract.to_dict()
+
+    @app.get("/api/resume-drafts", response_model=list[ResumeDraftSummaryOut])
+    def list_user_resume_drafts(
+        engine: Annotated[DatabaseEngine, Depends(get_engine)],
+        user: Annotated[dict, Depends(get_current_user)],
+        job_id: Annotated[int | None, Query()] = None,
+    ) -> list[dict]:
+        drafts = list_resume_drafts(engine, user["id"], job_id)
+        return [
+            {
+                "id": d["id"],
+                "job_id": d["job_id"],
+                "title": d["title"],
+                "status": _compute_draft_status(d),
+                "created_at": d["created_at"],
+                "updated_at": d["updated_at"],
+            }
+            for d in drafts
+        ]
 
     @app.post("/api/resume-drafts", response_model=ResumeDraftOut, status_code=201)
     def resume_drafts(

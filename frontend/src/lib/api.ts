@@ -1,16 +1,17 @@
 import type {
-  AnalyticsSummary,
-  CrawlRun,
-  Institution,
-  JobDetail,
-  JobList,
-  Profile,
-  ProfileImportResult,
-  Report,
-  ResumeDraft,
-  ResumeSection,
-  JobUserStatus,
-  Subscription
+ AnalyticsSummary,
+ CrawlRun,
+ Institution,
+ JobDetail,
+ JobList,
+ Profile,
+ ProfileImportResult,
+ Report,
+ ResumeDraft,
+ ResumeDraftSummary,
+ ResumeSection,
+ JobUserStatus,
+ Subscription
 } from "../types";
 import type {
   FieldReferenceResult,
@@ -164,7 +165,12 @@ export const api = {
       body: JSON.stringify({ job_id: jobId })
     }),
   getResumeDraft: (draftId: number) =>
-    request<ResumeDraft>(`/api/resume-drafts/${draftId}`),
+ request<ResumeDraft>(`/api/resume-drafts/${draftId}`),
+ listResumeDrafts: (jobId?: number) => {
+ const query = new URLSearchParams();
+ if (jobId != null) query.set("job_id", String(jobId));
+ return request<ResumeDraftSummary[]>(`/api/resume-drafts${query.toString() ? `?${query}` : ""}`);
+ },
   updateResumeDraft: (draftId: number, sections: ResumeSection[]) =>
     request<ResumeDraft>(`/api/resume-drafts/${draftId}`, {
       method: "PUT",

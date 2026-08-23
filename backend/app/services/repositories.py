@@ -473,6 +473,28 @@ def list_resume_drafts_by_user(engine: DatabaseEngine, user_id: int) -> list[dic
     return items
 
 
+def list_resume_drafts(
+    engine: DatabaseEngine, user_id: int, job_id: int | None = None
+) -> list[dict[str, Any]]:
+    """List a user's resume drafts, newest first, optionally filtered by job.
+
+    User isolation is enforced in the SQL WHERE clause.  ``sections`` is parsed
+    so the caller can compute review status, but evidence/gaps are not loaded.
+    """
+    query = "SELECT id, job_id, title, sections, created_at, updated_at FROM resume_drafts WHERE user_id = ?"
+    params: list[Any] = [user_id]
+    if job_id is not None:
+        query += " AND job_id = ?"
+        params.append(job_id)
+    query += " ORDER BY created_at DESC, id DESC"
+    with connect(engine) as conn:
+        rows = conn.execute(query, params).fetchall()
+    items = rows_to_dicts(rows)
+    for item in items:
+        item["sections"] = from_json(item["sections"], [])
+    return items
+
+
 def save_report(engine: DatabaseEngine, title: str, markdown: str, html: str, filters: dict[str, Any]) -> dict[str, Any]:
     created = now_iso()
     with connect(engine) as conn:

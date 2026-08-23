@@ -493,6 +493,15 @@ class ResumeDraftOut(BaseModel):
     updated_at: str
 
 
+class ResumeDraftSummaryOut(BaseModel):
+    id: int
+    job_id: int
+    title: str
+    status: str = "draft"
+    created_at: str
+    updated_at: str
+
+
 class ReportCreate(BaseModel):
     title: str = "医疗岗位市场分析报告"
     filters: dict[str, Any] = Field(default_factory=dict)
