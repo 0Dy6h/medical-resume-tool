@@ -1322,6 +1322,53 @@ pre {
   }
 }
 
+/* Resume draft history list */
+.history-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  margin-bottom: 0.4rem;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
+.history-item-active {
+  border-color: var(--blue);
+  background: var(--blue-soft);
+}
+
+.history-item-title {
+  font-size: 0.85rem;
+}
+
+.history-item-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.history-item-time {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+/* Analytics parser warning banner */
+.warning-banner {
+  margin-bottom: 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--red);
+  border-radius: 6px;
+  background: var(--red-soft);
+  color: var(--red);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
 /* Pagination */
 .pagination-row {
   display: flex;

@@ -413,28 +413,15 @@ export function ResumePage() {
                 key={item.id}
                 className={`history-item${draft?.id === item.id ? " history-item-active" : ""}`}
                 onClick={() => void loadHistoricalDraft(item.id)}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  width: "100%",
-                  padding: "0.5rem 0.75rem",
-                  border: draft?.id === item.id ? "1px solid #3b82f6" : "1px solid #e5e7eb",
-                  borderRadius: "6px",
-                  marginBottom: "0.4rem",
-                  background: draft?.id === item.id ? "#eff6ff" : "transparent",
-                  cursor: "pointer",
-                  textAlign: "left",
-                }}
               >
-                <span style={{ fontSize: "0.85rem" }}>
+                <span className="history-item-title">
                   <strong>#{item.id}</strong> {item.title}
                 </span>
-                <span style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                <span className="history-item-meta">
                   <span className={`status ${item.status === "reviewed" ? "success" : "idle"}`}>
                     {item.status === "reviewed" ? "已审阅" : "草稿"}
                   </span>
-                  <span style={{ fontSize: "0.75rem", color: "#6b7280" }}>
+                  <span className="history-item-time">
                     {item.updated_at.replace("T", " ").slice(0, 16)}
                   </span>
                 </span>

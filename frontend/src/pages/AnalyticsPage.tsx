@@ -89,18 +89,7 @@ export function AnalyticsPage({ onNavigate }: AnalyticsPageProps) {
       </div>
 
       {showParserWarning && (
-        <div
-          style={{
-            marginBottom: "12px",
-            padding: "10px 14px",
-            border: "1px solid var(--red)",
-            borderRadius: "6px",
-            background: "var(--red-soft)",
-            color: "var(--red)",
-            fontSize: "13px",
-            lineHeight: 1.5,
-          }}
-        >
+        <div className="warning-banner">
           所有解析器均处于失效状态，相关机构职位推送已暂停，请等待修复
         </div>
       )}
