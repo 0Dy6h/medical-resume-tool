@@ -71,6 +71,40 @@ def _apply_cjk_default_font(document: Document) -> None:
         pass
 
 
+_SKIP_SECTION_IDS = {
+    "identity",
+    "target",
+    "gaps",
+    "appendix",
+    "appendix-satisfied",
+    "appendix-unmet",
+    "appendix-unlinked",
+}
+_SKIP_SECTION_TITLE = "投递前需补充确认"
+
+
+def collect_unlinked_items(draft: dict[str, Any]) -> list[dict[str, Any]]:
+    """Collect items in profile-collection sections that have no profile_field_id.
+
+    Structural sections (identity/target/gaps/appendix) and the confirm-before-
+    apply section are excluded so that system-generated boilerplate is never
+    mis-flagged as user-added content.
+    """
+    unlinked: list[dict[str, Any]] = []
+    for section in draft.get("sections", []):
+        if section.get("id") in _SKIP_SECTION_IDS:
+            continue
+        if str(section.get("title", "")).strip() == _SKIP_SECTION_TITLE:
+            continue
+        for item in section.get("items", []):
+            if item.get("decision") == "remove":
+                continue
+            if str(item.get("profile_field_id") or "").strip():
+                continue
+            unlinked.append({"text": item.get("text", "")})
+    return unlinked
+
+
 def _build_appendix_sections(draft: dict[str, Any]) -> list[dict[str, Any]]:
     """Build match-analysis appendix sections from evidence and gaps.
 
@@ -107,6 +141,11 @@ def _build_appendix_sections(draft: dict[str, Any]) -> list[dict[str, Any]]:
         sections.append({"id": "appendix-satisfied", "title": "已满足", "items": satisfied_items})
     if unmet_items:
         sections.append({"id": "appendix-unmet", "title": "未满足", "items": unmet_items})
+
+    unlinked_items = collect_unlinked_items(draft)
+    if unlinked_items:
+        sections.append({"id": "appendix-unlinked", "title": "用户手动添加，无档案证据", "items": unlinked_items})
+
     return sections
 
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { flattenReviewItems, computeDraftStatus, reviewTone, filterExportSections, exportBlock, readPendingDraftId, PENDING_DRAFT_KEY } from "./ResumePage";
+import { flattenReviewItems, computeDraftStatus, reviewTone, filterExportSections, exportBlock, readPendingDraftId, PENDING_DRAFT_KEY, isUnlinkedReviewItem } from "./ResumePage";
 import type { ResumeSection } from "../types";
 
 const sampleSections: ResumeSection[] = [
@@ -210,5 +210,39 @@ describe("readPendingDraftId — 待加载草稿 ID 读取", () => {
   it("返回 null 当值为 0 或负数", () => {
     expect(readPendingDraftId({ getItem: () => "0" })).toBeNull();
     expect(readPendingDraftId({ getItem: () => "-5" })).toBeNull();
+  });
+});
+
+describe("isUnlinkedReviewItem — 无档案证据关联判定", () => {
+  it("identity 区块条目排除 → false", () => {
+    expect(isUnlinkedReviewItem({ text: "林晓" }, "identity")).toBe(false);
+  });
+
+  it("target 区块条目排除 → false", () => {
+    expect(isUnlinkedReviewItem({ text: "应聘科研助理" }, "target")).toBe(false);
+  });
+
+  it("gaps 区块条目排除 → false", () => {
+    expect(isUnlinkedReviewItem({ text: "未找到SCI论文证据" }, "gaps")).toBe(false);
+  });
+
+  it("集合区块无 profile_field_id → true", () => {
+    expect(isUnlinkedReviewItem({ text: "自定义经历" }, "experiences")).toBe(true);
+  });
+
+  it("集合区块有空 profile_field_id → true", () => {
+    expect(isUnlinkedReviewItem({ text: "自定义经历", profile_field_id: "" }, "experiences")).toBe(true);
+  });
+
+  it("集合区块有 profile_field_id → false", () => {
+    expect(isUnlinkedReviewItem({ text: "科研助理", profile_field_id: "exp-1" }, "experiences")).toBe(false);
+  });
+
+  it("decision 为 remove 的条目排除 → false", () => {
+    expect(isUnlinkedReviewItem({ text: "自定义经历", decision: "remove" }, "experiences")).toBe(false);
+  });
+
+  it("标题为「投递前需补充确认」的区块排除 → false", () => {
+    expect(isUnlinkedReviewItem({ text: "待确认项", sectionTitle: "投递前需补充确认" }, "custom")).toBe(false);
   });
 });

@@ -10,6 +10,7 @@ from app.main import create_app
 from app.services import crawler as crawler_module
 from app.services.crawler import ParsedJob
 from app.services.database import connect, create_engine, init_db, reset_db
+from app.services.exporter import collect_unlinked_items
 from app.services.repositories import get_profile, get_resume_draft
 
 
@@ -1189,3 +1190,103 @@ def test_resume_draft_history_list_filter_isolation_and_status(tmp_path):
     assert reviewed_item["status"] == "reviewed"
     draft_item = next(item for item in drafts_after if item["id"] == d1["id"])
     assert draft_item["status"] == "draft"
+
+
+def test_collect_unlinked_items_pure_function():
+    """collect_unlinked_items excludes structural sections and removed items."""
+    draft = {
+        "sections": [
+            {"id": "identity", "title": "个人信息", "items": [{"text": "林晓"}, {"text": "电话：13800000000"}]},
+            {"id": "target", "title": "求职目标", "items": [{"text": "应聘科研助理"}]},
+            {"id": "gaps", "title": "投递前需补充确认", "items": [{"text": "未找到SCI论文证据"}]},
+            {"id": "education", "title": "教育背景", "items": [
+                {"text": "复旦大学 / 硕士", "profile_field_id": "edu-1"},
+                {"text": "第二大学 / 学士", "profile_field_id": "edu-2", "decision": "remove"},
+                {"text": "自学课程", "profile_field_id": ""},
+            ]},
+            {"id": "experiences", "title": "工作经历", "items": [
+                {"text": "科研助理", "profile_field_id": "exp-1"},
+                {"text": "自定义经历"},
+            ]},
+        ],
+    }
+
+    result = collect_unlinked_items(draft)
+    texts = [item["text"] for item in result]
+    assert "自学课程" in texts
+    assert "自定义经历" in texts
+    assert "林晓" not in texts
+    assert "应聘科研助理" not in texts
+    assert "未找到SCI论文证据" not in texts
+    assert "第二大学 / 学士" not in texts
+    assert "复旦大学 / 硕士" not in texts
+    assert "科研助理" not in texts
+    assert len(result) == 2
+
+
+def test_diagnostic_export_marks_unlinked_items(tmp_path):
+    """PRD 4.4: diagnostic version marks items without profile_field_id."""
+    client = make_client(tmp_path)
+    auth = auth_headers(client)
+    crawl_and_wait(client, [1])
+    job = client.get("/api/jobs", params={"keyword": "科研"}).json()["items"][0]
+    profile_payload = {
+        "basics": {"name": "未关联测试"},
+        "education": [{"id": "edu-1", "school": "复旦大学", "degree": "硕士", "major": "临床医学"}],
+        "skills": [{"id": "skill-1", "name": "SPSS"}, {"id": "skill-2", "name": "英语阅读能力良好"}],
+    }
+    client.put("/api/profile", json=profile_payload, headers=auth)
+    draft = client.post("/api/resume-drafts", json={"job_id": job["id"]}, headers=auth).json()
+
+    # Set all decisions so export succeeds without override.
+    sections = draft["sections"]
+    for section in sections:
+        for item in section["items"]:
+            item["decision"] = "adopt"
+    client.put(f"/api/resume-drafts/{draft['id']}", json={"sections": sections}, headers=auth)
+
+    # ── ① Normal draft: diagnostic export must NOT contain unlinked section ──
+    diag_clean = client.post(
+        f"/api/resume-drafts/{draft['id']}/export",
+        params={"format": "docx", "mode": "diagnostic", "override": True},
+        headers=auth,
+    )
+    assert diag_clean.status_code == 200
+    assert "用户手动添加，无档案证据" not in docx_document_xml(diag_clean.content)
+
+    # ── ② Strip profile_field_id from a collection item, then export ──
+    target_text = None
+    for section in sections:
+        if section["id"] in {"identity", "target", "gaps"}:
+            continue
+        if str(section.get("title", "")).strip() == "投递前需补充确认":
+            continue
+        for item in section["items"]:
+            if item.get("profile_field_id"):
+                target_text = item["text"]
+                item["profile_field_id"] = ""
+                break
+        if target_text is not None:
+            break
+    assert target_text is not None, "expected at least one collection item with profile_field_id"
+
+    client.put(f"/api/resume-drafts/{draft['id']}", json={"sections": sections}, headers=auth)
+
+    diag = client.post(
+        f"/api/resume-drafts/{draft['id']}/export",
+        params={"format": "docx", "mode": "diagnostic", "override": True},
+        headers=auth,
+    )
+    assert diag.status_code == 200
+    diag_xml = docx_document_xml(diag.content)
+    assert "用户手动添加，无档案证据" in diag_xml
+    assert target_text in diag_xml
+
+    # ── ③ Application export must NOT contain the unlinked section ──
+    app = client.post(
+        f"/api/resume-drafts/{draft['id']}/export",
+        params={"format": "docx", "mode": "application", "override": True},
+        headers=auth,
+    )
+    assert app.status_code == 200
+    assert "用户手动添加，无档案证据" not in docx_document_xml(app.content)

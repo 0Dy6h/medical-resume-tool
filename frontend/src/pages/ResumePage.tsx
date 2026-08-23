@@ -82,6 +82,27 @@ export function exportBlock(sections: ResumeSection[]): ExportGuardResult {
   return { kind: "confirm", pending };
 }
 
+const UNLINKED_SKIP_SECTION_IDS = new Set([
+  "identity",
+  "target",
+  "gaps",
+  "appendix",
+  "appendix-satisfied",
+  "appendix-unmet",
+  "appendix-unlinked",
+]);
+const UNLINKED_SKIP_SECTION_TITLE = "投递前需补充确认";
+
+export function isUnlinkedReviewItem(
+  item: { text?: string; profile_field_id?: string; decision?: string; sectionTitle?: string },
+  sectionId: string,
+): boolean {
+  if (UNLINKED_SKIP_SECTION_IDS.has(sectionId)) return false;
+  if (item.sectionTitle?.trim() === UNLINKED_SKIP_SECTION_TITLE) return false;
+  if (item.decision === "remove") return false;
+  return !String(item.profile_field_id ?? "").trim();
+}
+
 export const PENDING_DRAFT_KEY = "pending_resume_draft_id";
 
 export function readPendingDraftId(storage: { getItem: (key: string) => string | null }): number | null {
@@ -516,6 +537,12 @@ export function ResumePage() {
                             ))}
                           </div>
                         )}
+                      </div>
+                    )}
+
+                    {isUnlinkedReviewItem(currentItem, currentItem.sectionId) && (
+                      <div style={{ marginTop: "0.5rem" }}>
+                        <span className="status danger">无档案证据关联</span>
                       </div>
                     )}
 
