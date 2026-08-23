@@ -375,6 +375,7 @@ class AnalyticsSummary(BaseModel):
     common_capabilities: list[dict[str, Any]]
     institution_focus: list[dict[str, Any]]
     parser_quality: list[dict[str, Any]]
+    generated_at: str | None = None
 
 
 class ProfilePayload(BaseModel):

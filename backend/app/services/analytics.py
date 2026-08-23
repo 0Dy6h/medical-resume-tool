@@ -6,7 +6,7 @@ from typing import Any
 
 from app.config import config
 from app.services.database import DatabaseEngine, connect, from_json
-from app.services.repositories import build_jobs_where_clause, save_report
+from app.services.repositories import build_jobs_where_clause, now_iso, save_report
 
 
 LOW_CONFIDENCE_THRESHOLD = config.low_confidence_threshold
@@ -98,6 +98,7 @@ def analytics_summary(engine: DatabaseEngine, filters: dict[str, Any] | None = N
 
     parser_quality = _parser_quality_payload(parser_stats)
     return {
+        "generated_at": now_iso(),
         "totals": {
             "jobs": total_jobs,
             "institutions": totals_row["institutions"] if totals_row else 0,

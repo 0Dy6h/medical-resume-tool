@@ -30,7 +30,7 @@ _DATE_FULL = re.compile(r"^(\d{4})-(\d{1,2})-(\d{1,2})$")
 _DATE_YM = re.compile(r"^(\d{4})-(\d{1,2})$")
 _DATE_Y = re.compile(r"^(\d{4})$")
 
-_OPEN_ENDED = frozenset({"至今", "now", "present", "current", "至今"})
+_OPEN_ENDED = frozenset({"至今", "now", "present", "current"})
 
 
 def parse_profile_date(raw: Any) -> tuple[date | None, bool]:

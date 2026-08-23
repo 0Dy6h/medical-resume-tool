@@ -81,7 +81,7 @@ export default function App() {
         <div className="content-area">
           {active === "overview" && <Overview onNavigate={(page) => setActive(page as PageId)} />}
           {active === "jobs" && <JobsPage onNavigate={(page) => setActive(page as PageId)} />}
-          {active === "analytics" && <AnalyticsPage />}
+          {active === "analytics" && <AnalyticsPage onNavigate={(page) => setActive(page as PageId)} />}
           {active === "profile" && <ProfilePage />}
           {active === "resume" && <ResumePage />}
           {active === "crawl" && <CrawlPage />}

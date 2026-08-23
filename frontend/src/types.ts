@@ -127,6 +127,7 @@ export type AnalyticsSummary = {
     focus: CountItem[];
   }>;
   parser_quality: ParserQuality[];
+  generated_at?: string;
 };
 
 export type ParserQuality = {
