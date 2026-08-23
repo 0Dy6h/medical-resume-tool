@@ -340,6 +340,19 @@ def _format_profile_item(collection: str, item: dict[str, Any]) -> str:
     )
 
 
+def is_total_mismatch(
+    evidence: list[dict[str, Any]], gaps: list[dict[str, Any]]
+) -> bool:
+    """Return True when the job has segmentable requirements but none matched.
+
+    ``gaps`` non-empty means the job has structured, evaluable requirements; when
+    ``evidence`` is empty at the same time, the profile missed every one of them.
+    Both empty (job with no structured requirements) is not a mismatch — the
+    matcher simply had nothing to evaluate.
+    """
+    return bool(gaps) and not evidence
+
+
 def generate_resume_draft(profile: Profile, job: dict[str, Any]) -> dict[str, Any]:
     """Generate a tailored resume draft from a typed Profile and a job dict."""
     evidence, gaps = match_profile_to_job(profile, job)

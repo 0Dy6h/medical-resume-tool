@@ -605,7 +605,7 @@ def test_resume_export_includes_identity_header_and_basics_persist(tmp_path):
         "projects": [],
         "publications": [],
         "certificates": [],
-        "skills": [{"id": "skill-1", "name": "SPSS"}],
+        "skills": [{"id": "skill-1", "name": "SPSS"}, {"id": "skill-2", "name": "英语阅读能力良好"}],
         "teaching": [],
         "awards": [],
         "languages": [],
@@ -692,14 +692,14 @@ def test_resume_export_modes_keep_application_copy_free_of_gap_diagnostics(tmp_p
     client = make_client(tmp_path)
     auth = auth_headers(client)
     crawl_and_wait(client, [1])
-    job = client.get("/api/jobs", params={"keyword": "科研"}).json()["items"][0]
+    job = client.get("/api/jobs", params={"keyword": "护理"}).json()["items"][0]
     profile_payload = {
         "education": [],
         "experiences": [],
         "projects": [],
         "publications": [],
         "certificates": [],
-        "skills": [{"id": "skill-1", "name": "绘画"}],
+        "skills": [{"id": "skill-1", "name": "病区护理与患者沟通"}],
         "teaching": [],
         "awards": [],
         "languages": [],
@@ -858,7 +858,7 @@ def test_resume_draft_decision_status_and_export_filtering(tmp_path):
     profile_payload = {
         "basics": {"name": "审阅测试"},
         "education": [{"id": "edu-1", "school": "复旦大学", "degree": "硕士", "major": "临床医学"}],
-        "skills": [{"id": "skill-1", "name": "SPSS"}],
+        "skills": [{"id": "skill-1", "name": "SPSS"}, {"id": "skill-2", "name": "英语阅读能力良好"}],
     }
     client.put("/api/profile", json=profile_payload, headers=auth)
 
@@ -922,7 +922,7 @@ def test_export_unreviewed_draft_returns_409_with_pending_count(tmp_path):
     job = client.get("/api/jobs", params={"keyword": "科研"}).json()["items"][0]
     profile_payload = {
         "basics": {"name": "测试"},
-        "skills": [{"id": "skill-1", "name": "SPSS"}],
+        "skills": [{"id": "skill-1", "name": "SPSS"}, {"id": "skill-2", "name": "英语阅读能力良好"}],
     }
     client.put("/api/profile", json=profile_payload, headers=auth)
     draft = client.post("/api/resume-drafts", json={"job_id": job["id"]}, headers=auth).json()
@@ -947,7 +947,7 @@ def test_export_unreviewed_draft_succeeds_with_override(tmp_path):
     job = client.get("/api/jobs", params={"keyword": "科研"}).json()["items"][0]
     profile_payload = {
         "basics": {"name": "测试"},
-        "skills": [{"id": "skill-1", "name": "SPSS"}],
+        "skills": [{"id": "skill-1", "name": "SPSS"}, {"id": "skill-2", "name": "英语阅读能力良好"}],
     }
     client.put("/api/profile", json=profile_payload, headers=auth)
     draft = client.post("/api/resume-drafts", json={"job_id": job["id"]}, headers=auth).json()
@@ -968,7 +968,7 @@ def test_export_empty_draft_returns_422(tmp_path):
     job = client.get("/api/jobs", params={"keyword": "科研"}).json()["items"][0]
     profile_payload = {
         "basics": {"name": "空导出"},
-        "skills": [{"id": "skill-1", "name": "SPSS"}],
+        "skills": [{"id": "skill-1", "name": "SPSS"}, {"id": "skill-2", "name": "英语阅读能力良好"}],
     }
     client.put("/api/profile", json=profile_payload, headers=auth)
     draft = client.post("/api/resume-drafts", json={"job_id": job["id"]}, headers=auth).json()
@@ -998,7 +998,7 @@ def test_diagnostic_export_appendix_contains_evidence_and_gaps(tmp_path):
     profile_payload = {
         "basics": {"name": "附录测试"},
         "education": [{"id": "edu-1", "school": "复旦大学", "degree": "硕士", "major": "临床医学"}],
-        "skills": [{"id": "skill-1", "name": "SPSS"}],
+        "skills": [{"id": "skill-1", "name": "SPSS"}, {"id": "skill-2", "name": "英语阅读能力良好"}],
     }
     client.put("/api/profile", json=profile_payload, headers=auth)
     draft = client.post("/api/resume-drafts", json={"job_id": job["id"]}, headers=auth).json()
@@ -1033,3 +1033,104 @@ def test_diagnostic_export_appendix_contains_evidence_and_gaps(tmp_path):
         assert "已满足" in diag_xml
     if draft["gaps"]:
         assert "未满足" in diag_xml
+
+
+def test_total_mismatch_returns_422_and_blocks_draft_creation(tmp_path, monkeypatch):
+    """PRD 4.4: zero-evidence against a job with structured requirements → 422."""
+    monkeypatch.setenv("CRAWL_DELAY_SECONDS", "0")
+    client = make_client(tmp_path)
+    auth = auth_headers(client)
+
+    async def crawl_controlled_jobs(institution):  # noqa: ANN001
+        return [
+            ParsedJob(
+                title="临床研究中心科研助理",
+                department="临床研究中心",
+                location="广东",
+                education="硕士",
+                profession="临床医学",
+                job_category="科研",
+                responsibilities="协助队列随访和统计分析。",
+                requirements="临床医学硕士，熟悉SPSS，具备临床研究和数据质控能力，英语阅读能力良好。",
+                posted_at=None,
+                deadline=None,
+                source_url="fixture://mismatch-job",
+                source_text_hash="mismatch-job-hash",
+                raw_text=(
+                    "临床研究中心科研助理 岗位职责：协助队列随访和统计分析。"
+                    "任职要求：临床医学硕士，熟悉SPSS，具备临床研究和数据质控能力，英语阅读能力良好。"
+                ),
+                tags=["科研"],
+                extraction_evidence={},
+                fetched_at="2026-06-10T00:00:00+00:00",
+                parser_name="test-parser",
+                confidence=0.9,
+            ),
+            ParsedJob(
+                title="年度招聘公告",
+                department=None,
+                location="广东",
+                education=None,
+                profession=None,
+                job_category="综合",
+                responsibilities="详见附件。",
+                requirements="详见附件。",
+                posted_at=None,
+                deadline=None,
+                source_url="fixture://notice-job",
+                source_text_hash="notice-job-hash",
+                raw_text="年度招聘公告，详见附件。",
+                tags=["综合"],
+                extraction_evidence={},
+                fetched_at="2026-06-10T00:00:00+00:00",
+                parser_name="test-parser",
+                confidence=0.7,
+            ),
+        ]
+
+    monkeypatch.setattr(crawler_module, "crawl_institution", crawl_controlled_jobs)
+    crawl_and_wait(client, [1])
+    jobs = client.get("/api/jobs").json()["items"]
+    req_job = next(j for j in jobs if j["source_url"] == "fixture://mismatch-job")
+    notice_job = next(j for j in jobs if j["source_url"] == "fixture://notice-job")
+
+    # ── ① Empty profile → 400 (existing guard unchanged) ──
+    resp = client.post("/api/resume-drafts", json={"job_id": req_job["id"]}, headers=auth)
+    assert resp.status_code == 400
+    assert "请先填写或导入履历内容" in resp.text
+
+    # ── ② Total mismatch → 422 + exact message + no DB row ──
+    client.put(
+        "/api/profile",
+        json={"basics": {"name": "不匹配"}, "skills": [{"id": "skill-1", "name": "绘画"}]},
+        headers=auth,
+    )
+    resp = client.post("/api/resume-drafts", json={"job_id": req_job["id"]}, headers=auth)
+    assert resp.status_code == 422
+    assert (
+        resp.json()["detail"]
+        == "您的档案与该岗位的要求差距较大，建议关注其他更匹配的职位"
+    )
+    with connect(client.app.state.engine) as conn:
+        count = conn.execute("SELECT COUNT(*) AS count FROM resume_drafts").fetchone()["count"]
+    assert count == 0
+
+    # ── ③ Partial match (SPSS matches one requirement) → 201 ──
+    client.put(
+        "/api/profile",
+        json={
+            "basics": {"name": "部分匹配"},
+            "skills": [{"id": "skill-1", "name": "熟练使用 SPSS 进行统计分析与数据处理"}],
+        },
+        headers=auth,
+    )
+    resp = client.post("/api/resume-drafts", json={"job_id": req_job["id"]}, headers=auth)
+    assert resp.status_code == 201
+    assert resp.json()["evidence"]
+
+    # ── ④ No structured requirements → 201 ──
+    resp = client.post("/api/resume-drafts", json={"job_id": notice_job["id"]}, headers=auth)
+    assert resp.status_code == 201
+    payload = resp.json()
+    assert payload["evidence"] == []
+    assert payload["gaps"] == []

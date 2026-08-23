@@ -76,7 +76,14 @@ from app.services.repositories import (
     create_resume_draft as persist_resume_draft,
 )
 from app.services.profile_checks import check_profile_overlaps, count_field_references
-from app.services.resume import PROFILE_COLLECTIONS, analyze_job_match, attach_job_matches, generate_resume_draft
+from app.services.resume import (
+    PROFILE_COLLECTIONS,
+    analyze_job_match,
+    attach_job_matches,
+    generate_resume_draft,
+    is_total_mismatch,
+    match_profile_to_job,
+)
 from app.services.scheduler import SubscriptionScheduler
 
 
@@ -354,6 +361,12 @@ def create_app(database_url: str | None = None) -> FastAPI:
         profile = get_profile(engine, user["id"])
         if profile.is_empty:
             raise HTTPException(status_code=400, detail="请先填写或导入履历内容")
+        evidence, gaps = match_profile_to_job(profile, job)
+        if is_total_mismatch(evidence, gaps):
+            raise HTTPException(
+                status_code=422,
+                detail="您的档案与该岗位的要求差距较大，建议关注其他更匹配的职位",
+            )
         draft = generate_resume_draft(profile, job)
         return _with_computed_status(
             persist_resume_draft(

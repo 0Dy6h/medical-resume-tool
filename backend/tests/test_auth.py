@@ -118,7 +118,7 @@ def test_resume_draft_not_visible_across_users(tmp_path):
         time.sleep(0.02)
     job = client.get("/api/jobs", params={"keyword": "护理"}).json()["items"][0]
 
-    client.put("/api/profile", json={"skills": [{"id": "s1", "name": "护理"}]}, headers=headers_a)
+    client.put("/api/profile", json={"skills": [{"id": "s1", "name": "病区护理与患者沟通"}]}, headers=headers_a)
     draft = client.post("/api/resume-drafts", json={"job_id": job["id"]}, headers=headers_a)
     assert draft.status_code == 201
     draft_id = draft.json()["id"]
