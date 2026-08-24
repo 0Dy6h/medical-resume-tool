@@ -75,7 +75,6 @@
 
 body {
   margin: 0;
-  min-width: 1120px;
   background: var(--bg);
   color: var(--ink);
 }
@@ -880,9 +879,15 @@ textarea {
 
 .split-page {
   display: grid;
-  grid-template-columns: minmax(620px, 1fr) 420px;
-  gap: 16px;
+  grid-template-columns: 1fr;
+  gap: var(--space-4);
   align-items: start;
+}
+
+@media (min-width: 1600px) {
+  .split-page {
+    grid-template-columns: minmax(0, 1fr) 420px;
+  }
 }
 
 .detail-panel {
@@ -2083,6 +2088,33 @@ pre {
   gap: 10px;
 }
 
+/* Subscriptions collapse for <1200px (grid-template-rows: 0fr → 1fr) */
+.subscriptions-collapse {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows var(--dur-slow) var(--ease-out);
+}
+
+.subscriptions-panel.collapsed .subscriptions-collapse {
+  grid-template-rows: 0fr;
+}
+
+.subscriptions-collapse-inner {
+  overflow: hidden;
+}
+
+@media (min-width: 1200px) {
+  .subscriptions-panel.collapsed .subscriptions-collapse {
+    grid-template-rows: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .subscriptions-collapse {
+    transition: none !important;
+  }
+}
+
 .panel-header {
   display: flex;
   align-items: flex-start;
@@ -2182,7 +2214,9 @@ pre {
 
 .empty-state p {
   font-size: 14px;
-  max-width: 360px;
+  max-width: 34em;
+  margin-inline: auto;
+  text-wrap: pretty;
 }
 
 .empty-state .small {
@@ -2377,12 +2411,12 @@ pre {
 /* Jobs page with subscriptions sidebar */
 .jobs-layout {
   display: grid;
-  grid-template-columns: 280px 1fr;
-  gap: 16px;
+  grid-template-columns: 260px 1fr;
+  gap: var(--space-4);
   align-items: start;
 }
 
-@media (max-width: 1024px) {
+@media (max-width: 1199px) {
   .jobs-layout {
     grid-template-columns: 1fr;
   }
@@ -2528,5 +2562,135 @@ pre {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
+  }
+
+  .detail-drawer,
+  .drawer-overlay {
+    transition: none !important;
+  }
+}
+
+/* === Jobs table title clamp === */
+.job-title-cell strong {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: normal;
+}
+
+.job-title-cell {
+  min-width: 0;
+}
+
+/* === Jobs table tag fold === */
+.tag-more {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-hover);
+  color: var(--muted);
+  padding: 0 var(--space-2);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+  cursor: default;
+}
+
+/* === Detail drawer (overlay) === */
+.drawer-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(23, 33, 31, 0.3);
+  opacity: 0;
+  transition: opacity var(--dur-slow) var(--ease-out);
+  z-index: 100;
+}
+
+.drawer-overlay.open {
+  opacity: 1;
+}
+
+.drawer-overlay.exiting {
+  opacity: 0;
+}
+
+.detail-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(480px, 92vw);
+  background: var(--surface);
+  border-left: 1px solid var(--line);
+  box-shadow: var(--shadow-3);
+  transform: translateX(100%);
+  transition: transform var(--dur-slow) var(--ease-out);
+  z-index: 101;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.detail-drawer.open {
+  transform: translateX(0);
+}
+
+.detail-drawer.exiting {
+  transform: translateX(100%);
+}
+
+.drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+}
+
+.drawer-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-4);
+}
+
+/* === Subscription collapse (<1200px) === */
+.subscriptions-content {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows var(--dur-slow) var(--ease-out);
+}
+
+.subscriptions-content.collapsed {
+  grid-template-rows: 0fr;
+}
+
+.subscriptions-content > .subscription-list {
+  overflow: hidden;
+  min-height: 0;
+}
+
+.subscriptions-toggle {
+  display: none;
+  align-items: center;
+  gap: var(--space-2);
+  cursor: pointer;
+}
+
+.subscriptions-toggle .collapse-indicator {
+  font-size: var(--text-xs);
+  color: var(--muted);
+}
+
+@media (max-width: 1199px) {
+  .subscriptions-toggle {
+    display: flex;
+  }
+}
+
+@media (min-width: 1200px) {
+  .subscriptions-content.collapsed {
+    grid-template-rows: 1fr;
   }
 }

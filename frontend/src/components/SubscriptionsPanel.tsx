@@ -19,6 +19,19 @@ export function SubscriptionsPanel({
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [markingId, setMarkingId] = useState<number | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [collapsed, setCollapsed] = useState(false);
+  const [isCompact, setIsCompact] = useState(false);
+
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 1199px)");
+    const update = () => {
+      setIsCompact(mq.matches);
+      setCollapsed(mq.matches);
+    };
+    update();
+    mq.addEventListener("change", update);
+    return () => mq.removeEventListener("change", update);
+  }, []);
 
   async function refresh() {
     if (!isLoggedIn) return;
@@ -76,10 +89,16 @@ export function SubscriptionsPanel({
   }
 
   return (
-    <div className="subscriptions-panel">
-      <div className="panel-header">
+    <div className={`subscriptions-panel${collapsed ? " collapsed" : ""}`}>
+      <div
+        className="panel-header"
+        onClick={() => isCompact && setCollapsed(!collapsed)}
+        style={isCompact ? { cursor: "pointer" } : undefined}
+        role={isCompact ? "button" : undefined}
+        aria-expanded={isCompact ? !collapsed : undefined}
+      >
         <div>
-          <h2>我的订阅</h2>
+          <h2>我的订阅{subscriptions.length > 0 ? `（${subscriptions.length}）` : ""}</h2>
           <p className="subtle">
             {subscriptions.length > 0
               ? `${subscriptions.length} 个订阅`
@@ -89,7 +108,7 @@ export function SubscriptionsPanel({
         {isLoggedIn && (
           <button
             className="icon-text-button compact"
-            onClick={() => setShowCreateDialog(true)}
+            onClick={(e) => { e.stopPropagation(); setShowCreateDialog(true); }}
             title="新建订阅"
           >
             <BellPlus size={16} />
@@ -98,71 +117,75 @@ export function SubscriptionsPanel({
         )}
       </div>
 
-      <div className="subscription-list">
-        {loading && subscriptions.length === 0 && (
-          <div className="empty-state">加载中…</div>
-        )}
-        {!loading && subscriptions.length === 0 && isLoggedIn && (
-          <div className="empty-state">
-            <Bell size={24} />
-            <p>还没有订阅</p>
-            <p className="subtle small">点击「新建」关注感兴趣的岗位</p>
-          </div>
-        )}
-        {!isLoggedIn && (
-          <div className="empty-state">
-            <Bell size={24} />
-            <p>登录后使用订阅</p>
-          </div>
-        )}
-        {subscriptions.map((sub) => {
-          const maintenanceCount = countMaintenanceInstitutions(sub.institution_statuses);
-          return (
-            <div key={sub.id} className="subscription-card">
-              <div className="subscription-card-header">
-                <h3>{sub.name}</h3>
-                <button
-                  className="icon-button subtle"
-                  onClick={() => void handleDelete(sub.id)}
-                  disabled={deletingId === sub.id}
-                  title="删除订阅"
-                >
-                  <Trash2 size={14} />
-                </button>
-              </div>
-              <p className="subscription-keyword">关键词：{sub.keyword}</p>
-              <p className="subscription-subtitle">
-                {sub.new_count > 0 && <span className="new-badge">{sub.new_count} 条新</span>}
-                {subscriptionSubtitle(sub)}
-              </p>
-              {maintenanceCount > 0 && (
-              <p className="maintenance-note">
-                <AlertTriangle size={12} />
-                {maintenanceCount} 家机构维护中 · 暂停推送
-              </p>
+      <div className="subscriptions-collapse">
+        <div className="subscriptions-collapse-inner">
+          <div className="subscription-list">
+            {loading && subscriptions.length === 0 && (
+              <div className="empty-state">加载中…</div>
             )}
-              <div className="subscription-card-actions">
-                <button
-                  className="text-button"
-                  onClick={() => void handleMarkRead(sub.id)}
-                  disabled={markingId === sub.id || sub.new_count === 0}
-                >
-                  <CheckCheck size={14} />
-                  {markingId === sub.id ? "处理中…" : "检查更新"}
-                </button>
+            {!loading && subscriptions.length === 0 && isLoggedIn && (
+              <div className="empty-state">
+                <Bell size={24} />
+                <p>还没有订阅</p>
+                <p className="subtle small">点击「新建」关注感兴趣的岗位</p>
               </div>
-            </div>
-          );
-        })}
-      </div>
+            )}
+            {!isLoggedIn && (
+              <div className="empty-state">
+                <Bell size={24} />
+                <p>登录后使用订阅</p>
+              </div>
+            )}
+            {subscriptions.map((sub) => {
+              const maintenanceCount = countMaintenanceInstitutions(sub.institution_statuses);
+              return (
+                <div key={sub.id} className="subscription-card">
+                  <div className="subscription-card-header">
+                    <h3>{sub.name}</h3>
+                    <button
+                      className="icon-button subtle"
+                      onClick={() => void handleDelete(sub.id)}
+                      disabled={deletingId === sub.id}
+                      title="删除订阅"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                  <p className="subscription-keyword">关键词：{sub.keyword}</p>
+                  <p className="subscription-subtitle">
+                    {sub.new_count > 0 && <span className="new-badge">{sub.new_count} 条新</span>}
+                    {subscriptionSubtitle(sub)}
+                  </p>
+                  {maintenanceCount > 0 && (
+                  <p className="maintenance-note">
+                    <AlertTriangle size={12} />
+                    {maintenanceCount} 家机构维护中 · 暂停推送
+                  </p>
+                )}
+                  <div className="subscription-card-actions">
+                    <button
+                      className="text-button"
+                      onClick={() => void handleMarkRead(sub.id)}
+                      disabled={markingId === sub.id || sub.new_count === 0}
+                    >
+                      <CheckCheck size={14} />
+                      {markingId === sub.id ? "处理中…" : "检查更新"}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
 
-      {showCreateDialog && (
-        <CreateSubscriptionDialog
-          institutions={institutions}
-          onClose={() => setShowCreateDialog(false)}
-          onCreated={handleCreated}
-        />
-      )}
+          {showCreateDialog && (
+            <CreateSubscriptionDialog
+              institutions={institutions}
+              onClose={() => setShowCreateDialog(false)}
+              onCreated={handleCreated}
+            />
+          )}
+        </div>
+      </div>
     </div>
   );
 }

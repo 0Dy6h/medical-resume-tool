@@ -1,12 +1,14 @@
 import { BookmarkCheck, BookmarkPlus, ExternalLink, RefreshCcw, Search, WandSparkles, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ButtonSpinner } from "../components/ButtonSpinner";
+import { DetailDrawer } from "../components/DetailDrawer";
 import { SubscriptionsPanel } from "../components/SubscriptionsPanel";
 import { StatusPill } from "../components/StatusPill";
 import { useToast } from "../components/Toast";
 import { useAuth } from "../components/AuthContext";
 import { api } from "../lib/api";
 import { formatDate } from "../lib/format";
+import { foldTags } from "../lib/jobUtils";
 import { findingLabel, findingTone } from "../lib/matchAnalysis";
 import type { Institution, Job, JobDetail, JobMatch } from "../types";
 
@@ -78,6 +80,20 @@ export function JobsPage({ onNavigate }: { onNavigate: (page: string) => void })
   const [statusNote, setStatusNote] = useState("");
   const [statusDeadline, setStatusDeadline] = useState("");
   const [generatingDraft, setGeneratingDraft] = useState(false);
+  const [isDesktop, setIsDesktop] = useState(true);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const triggerRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 1600px)");
+    const update = () => {
+      setIsDesktop(mq.matches);
+      if (mq.matches) setDrawerOpen(false);
+    };
+    update();
+    mq.addEventListener("change", update);
+    return () => mq.removeEventListener("change", update);
+  }, []);
 
   async function refresh(targetPage = page) {
     setLoading(true);
@@ -110,11 +126,13 @@ export function JobsPage({ onNavigate }: { onNavigate: (page: string) => void })
     void refresh(0);
   }
 
-  async function selectJob(job: Job) {
+  async function selectJob(job: Job, rowEl?: HTMLElement) {
+    if (rowEl) triggerRef.current = rowEl;
     try {
       const payload = await api.job(job.id);
       setDetail(payload);
       syncStatusForm(payload);
+      if (!isDesktop) setDrawerOpen(true);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "加载岗位详情失败");
     }
@@ -268,6 +286,15 @@ export function JobsPage({ onNavigate }: { onNavigate: (page: string) => void })
           </button>
         </div>
         <table>
+          <colgroup>
+            <col style={{ width: "32%" }} />
+            <col style={{ width: "18%" }} />
+            <col style={{ width: "9%" }} />
+            <col style={{ width: "9%" }} />
+            <col style={{ width: "12%" }} />
+            <col style={{ width: "10%" }} />
+            <col style={{ width: "10%" }} />
+          </colgroup>
           <thead>
             <tr>
               <th>岗位</th>
@@ -297,14 +324,14 @@ export function JobsPage({ onNavigate }: { onNavigate: (page: string) => void })
                 const freshTag = freshnessTag(job.posted_at, job.fetched_at);
                 const matchLabel = computeMatchLabel(job.match);
                 return (
-                <tr key={job.id} className={detail?.id === job.id ? "active-row" : ""} onClick={() => void selectJob(job)}>
-                  <td>
+                <tr key={job.id} className={detail?.id === job.id ? "active-row" : ""} tabIndex={-1} onClick={(e) => void selectJob(job, e.currentTarget)}>
+                  <td title={job.title}>
                     <div className="job-title-cell">
                       {freshTag && <span className={`freshness-badge freshness-${freshTag}`}>{freshTag}</span>}
                       <strong>{job.title}</strong>
                     </div>
                   </td>
-                  <td>{job.institution_name}</td>
+                  <td title={job.institution_name}>{job.institution_name}</td>
                   <td>{job.job_category}</td>
                   <td>{job.education}</td>
                   <td>
@@ -329,7 +356,17 @@ export function JobsPage({ onNavigate }: { onNavigate: (page: string) => void })
                   <td>{job.user_status ? <StatusPill value={job.user_status.status} /> : <span className="subtle">未评估</span>}</td>
                   <td>
                     <div className="tag-row">
-                      {job.tags.slice(0, 4).map((tag) => <span className="tag" key={tag}>{tag}</span>)}
+                      {(() => {
+                        const { visible, hidden, remaining } = foldTags(job.tags);
+                        return (
+                          <>
+                            {visible.map((tag) => <span className="tag" key={tag}>{tag}</span>)}
+                            {remaining > 0 && (
+                              <span className="tag-more" title={hidden.join("、")}>+{remaining}</span>
+                            )}
+                          </>
+                        );
+                      })()}
                     </div>
                   </td>
                 </tr>
@@ -361,10 +398,32 @@ export function JobsPage({ onNavigate }: { onNavigate: (page: string) => void })
         )}
       </section>
 
-      <aside className="detail-panel">
-        {detail ? (
-          <>
-            <div className="detail-head">
+      {isDesktop ? (
+        <aside className="detail-panel">
+          {renderDetailContent()}
+        </aside>
+      ) : (
+        drawerOpen && detail && (
+          <DetailDrawer
+            title={detail.title}
+            triggerRef={triggerRef}
+            onClose={() => setDrawerOpen(false)}
+          >
+            {renderDetailContent()}
+          </DetailDrawer>
+        )
+      )}
+      </div>
+    </div>
+  );
+
+  function renderDetailContent() {
+    if (!detail) {
+      return <div className="empty-line">暂无选中岗位</div>;
+    }
+    return (
+      <>
+        <div className="detail-head">
               <div>
                 <h2>{detail.title}</h2>
                 <span>{detail.institution_name}</span>
@@ -512,14 +571,9 @@ export function JobsPage({ onNavigate }: { onNavigate: (page: string) => void })
             </div>
             <h3>原文快照</h3>
             <pre>{detail.raw_snapshot.raw_text}</pre>
-          </>
-        ) : (
-          <div className="empty-line">暂无选中岗位</div>
-        )}
-      </aside>
-      </div>
-    </div>
-  );
+      </>
+    );
+  }
 }
 
 function EvidenceRow({ label, value, link = false }: { label: string; value?: string | null; link?: boolean }) {
