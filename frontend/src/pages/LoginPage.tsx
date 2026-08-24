@@ -1,5 +1,6 @@
 import { Activity, Database, FileText, LockKeyhole, LogIn, UserPlus } from "lucide-react";
 import { useState } from "react";
+import { ButtonSpinner } from "../components/ButtonSpinner";
 import { useAuth } from "../components/AuthContext";
 import { useToast } from "../components/Toast";
 import { api } from "../lib/api";
@@ -100,7 +101,7 @@ export function LoginPage() {
             </label>
           </div>
           <button className="primary-button auth-submit" onClick={submit} disabled={busy}>
-            {mode === "login" ? <LogIn size={17} /> : <UserPlus size={17} />}
+            {busy ? <ButtonSpinner /> : mode === "login" ? <LogIn size={17} /> : <UserPlus size={17} />}
             {busy ? "处理中…" : mode === "login" ? "登录" : "注册"}
           </button>
           <p className="auth-note">提示：当前为演示环境（HTTP），请勿填写真实身份证、银行卡等敏感信息。</p>

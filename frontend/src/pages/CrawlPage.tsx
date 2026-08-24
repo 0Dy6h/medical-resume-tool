@@ -1,5 +1,6 @@
-import { CheckSquare, Loader2, Play, RefreshCcw, Square } from "lucide-react";
+import { CheckSquare, Play, RefreshCcw, Square } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { ButtonSpinner } from "../components/ButtonSpinner";
 import { StatusPill } from "../components/StatusPill";
 import { useToast } from "../components/Toast";
 import { api } from "../lib/api";
@@ -135,7 +136,7 @@ export function CrawlPage() {
             刷新
           </button>
           <button className="primary-button" onClick={startCrawl} disabled={crawling || selectedIds.length === 0}>
-            {crawling ? <Loader2 size={17} className="spin" /> : <Play size={17} />}
+            {crawling ? <ButtonSpinner /> : <Play size={17} />}
             {crawling ? "抓取中…" : "启动"}
           </button>
         </div>

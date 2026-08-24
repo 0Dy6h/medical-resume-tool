@@ -1,5 +1,7 @@
 import { FileText, RefreshCcw } from "lucide-react";
 import { useEffect, useState } from "react";
+import { AnimatedNumber } from "../components/AnimatedNumber";
+import { ButtonSpinner } from "../components/ButtonSpinner";
 import { DataBar } from "../components/DataBar";
 import { StatusPill } from "../components/StatusPill";
 import { useToast } from "../components/Toast";
@@ -51,6 +53,60 @@ export function AnalyticsPage({ onNavigate }: AnalyticsPageProps) {
     void refresh();
   }, []);
 
+  // B6: Skeleton for metric grid
+  const metricSkeleton = (
+    <div className="metric-grid stagger-children">
+      <div className="metric" aria-hidden="true">
+        <span>岗位样本</span>
+        <strong><span className="skeleton skeleton-text" style={{ width: "50%" }} /></strong>
+      </div>
+      <div className="metric" aria-hidden="true">
+        <span>机构数量</span>
+        <strong><span className="skeleton skeleton-text" style={{ width: "40%" }} /></strong>
+      </div>
+      <div className="metric" aria-hidden="true">
+        <span>解析器</span>
+        <strong><span className="skeleton skeleton-text" style={{ width: "40%" }} /></strong>
+      </div>
+      <div className="metric accent" aria-hidden="true">
+        <span>需复核解析器</span>
+        <strong><span className="skeleton skeleton-text" style={{ width: "30%" }} /></strong>
+      </div>
+      <span className="sr-only">加载中…</span>
+    </div>
+  );
+
+  // B6: Skeleton for quality table
+  const qualityTableSkeleton = (
+    <table className="quality-table">
+      <thead>
+        <tr>
+          <th>解析器</th>
+          <th>岗位</th>
+          <th>附件行</th>
+          <th>低置信</th>
+          <th>附件失败</th>
+          <th>平均置信</th>
+          <th>状态</th>
+        </tr>
+      </thead>
+      <tbody className="stagger-children">
+        {Array.from({ length: 6 }, (_, i) => (
+          <tr key={`q-skel-${i}`} aria-hidden="true">
+            <td><div className="skeleton skeleton-text" style={{ width: "70%" }} /></td>
+            <td className="numeric-cell"><div className="skeleton skeleton-text" style={{ width: "40%", marginLeft: "auto" }} /></td>
+            <td className="numeric-cell"><div className="skeleton skeleton-text" style={{ width: "40%", marginLeft: "auto" }} /></td>
+            <td className="numeric-cell"><div className="skeleton skeleton-text" style={{ width: "40%", marginLeft: "auto" }} /></td>
+            <td className="numeric-cell"><div className="skeleton skeleton-text" style={{ width: "40%", marginLeft: "auto" }} /></td>
+            <td className="numeric-cell"><div className="skeleton skeleton-text" style={{ width: "50%", marginLeft: "auto" }} /></td>
+            <td><div className="skeleton skeleton-text" style={{ width: "60%" }} /></td>
+          </tr>
+        ))}
+        <tr><td colSpan={7} className="sr-only">加载中…</td></tr>
+      </tbody>
+    </table>
+  );
+
   return (
     <div className="page-stack">
       <div className="toolbar">
@@ -77,12 +133,13 @@ export function AnalyticsPage({ onNavigate }: AnalyticsPageProps) {
               数据质量
             </button>
           </div>
-          <button className="icon-text-button" onClick={refresh} disabled={loading}>
+          <button className="secondary-button" onClick={refresh} disabled={loading}>
             <RefreshCcw size={17} />
             刷新
           </button>
+          {/* Task C: 生成报告是本页主 CTA */}
           <button className="primary-button" onClick={createReport} disabled={reporting}>
-            <FileText size={17} />
+            {reporting ? <ButtonSpinner /> : <FileText size={17} />}
             {reporting ? "生成中…" : "报告"}
           </button>
         </div>
@@ -94,7 +151,7 @@ export function AnalyticsPage({ onNavigate }: AnalyticsPageProps) {
         </div>
       )}
 
-      {totalJobs === 0 ? (
+      {totalJobs === 0 && !loading ? (
         <section className="empty-state">
           <p>暂无数据，请先执行一次爬取任务</p>
           {onNavigate && (
@@ -105,12 +162,15 @@ export function AnalyticsPage({ onNavigate }: AnalyticsPageProps) {
         </section>
       ) : activeTab === "market" ? (
         <>
-          <div className="metric-grid">
-            <div className="metric"><span>岗位样本</span><strong>{summary?.totals.jobs ?? 0}</strong></div>
-            <div className="metric"><span>机构数量</span><strong>{summary?.totals.institutions ?? 0}</strong></div>
-            <div className="metric"><span>解析器</span><strong>{summary?.totals.parsers ?? 0}</strong></div>
-            <div className="metric accent"><span>需复核解析器</span><strong>{reviewParserCount}</strong></div>
-          </div>
+          {/* B5 + B6: Metric grid with animated numbers and skeleton */}
+          {loading && !summary ? metricSkeleton : (
+            <div className="metric-grid stagger-children">
+              <div className="metric"><span>岗位样本</span><strong><AnimatedNumber value={summary?.totals.jobs ?? 0} /></strong></div>
+              <div className="metric"><span>机构数量</span><strong><AnimatedNumber value={summary?.totals.institutions ?? 0} /></strong></div>
+              <div className="metric"><span>解析器</span><strong><AnimatedNumber value={summary?.totals.parsers ?? 0} /></strong></div>
+              <div className="metric accent"><span>需复核解析器</span><strong><AnimatedNumber value={reviewParserCount} /></strong></div>
+            </div>
+          )}
 
           <div className="analysis-grid">
             <DataBar title="岗位大类" items={summary?.job_categories ?? []} />
@@ -124,7 +184,7 @@ export function AnalyticsPage({ onNavigate }: AnalyticsPageProps) {
             <div className="panel-head">
               <h2>机构发力方向</h2>
             </div>
-            <div className="compact-list">
+            <div className="compact-list stagger-children">
               {(summary?.institution_focus ?? []).slice(0, 12).map((item) => (
                 <div className="compact-row" key={item.institution}>
                   <strong>{item.institution}</strong>
@@ -142,7 +202,7 @@ export function AnalyticsPage({ onNavigate }: AnalyticsPageProps) {
             <h2>解析器质量</h2>
             <span className="subtle">低置信 {summary?.totals.low_confidence_jobs ?? 0} · 附件失败 {summary?.totals.failed_attachment_events ?? 0}</span>
           </div>
-          {parserQuality.length === 0 ? (
+          {loading && parserQuality.length === 0 ? qualityTableSkeleton : parserQuality.length === 0 ? (
             <div className="empty-line">暂无数据</div>
           ) : (
             <table className="quality-table">
@@ -157,7 +217,8 @@ export function AnalyticsPage({ onNavigate }: AnalyticsPageProps) {
                   <th>状态</th>
                 </tr>
               </thead>
-              <tbody>
+              {/* B4: Stagger enter for quality table rows */}
+              <tbody className="stagger-children">
                 {parserQuality.map((item) => (
                   <tr key={item.parser_name}>
                     <td className="parser-name"><strong>{item.parser_name}</strong></td>

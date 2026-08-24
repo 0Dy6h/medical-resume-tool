@@ -1,5 +1,6 @@
 import { BookmarkCheck, BookmarkPlus, ExternalLink, RefreshCcw, Search, WandSparkles, X } from "lucide-react";
 import { useEffect, useState } from "react";
+import { ButtonSpinner } from "../components/ButtonSpinner";
 import { SubscriptionsPanel } from "../components/SubscriptionsPanel";
 import { StatusPill } from "../components/StatusPill";
 import { useToast } from "../components/Toast";
@@ -191,6 +192,33 @@ export function JobsPage({ onNavigate }: { onNavigate: (page: string) => void })
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
+  // B6: Skeleton rows for loading state
+  const skeletonRows = Array.from({ length: 8 }, (_, i) => (
+    <tr key={`skeleton-${i}`} aria-hidden="true">
+      <td>
+        <div className="skeleton skeleton-text" style={{ width: "70%" }} />
+      </td>
+      <td>
+        <div className="skeleton skeleton-text" style={{ width: "60%" }} />
+      </td>
+      <td>
+        <div className="skeleton skeleton-text" style={{ width: "50%" }} />
+      </td>
+      <td>
+        <div className="skeleton skeleton-text" style={{ width: "40%" }} />
+      </td>
+      <td>
+        <div className="skeleton skeleton-text" style={{ width: "80%" }} />
+      </td>
+      <td>
+        <div className="skeleton skeleton-text" style={{ width: "50%" }} />
+      </td>
+      <td>
+        <div className="skeleton skeleton-text" style={{ width: "60%" }} />
+      </td>
+    </tr>
+  ));
+
   return (
     <div className="jobs-layout">
       <SubscriptionsPanel institutions={institutions} isLoggedIn={!!auth.token} />
@@ -234,7 +262,7 @@ export function JobsPage({ onNavigate }: { onNavigate: (page: string) => void })
               <option key={item} value={item}>{item}</option>
             ))}
           </select>
-          <button className="icon-text-button" onClick={search}>
+          <button className="secondary-button" onClick={search}>
             <Search size={17} />
             查询
           </button>
@@ -251,11 +279,17 @@ export function JobsPage({ onNavigate }: { onNavigate: (page: string) => void })
               <th>标签</th>
             </tr>
           </thead>
-          <tbody>
-            {jobs.length === 0 ? (
+          {/* B4: Stagger enter for table rows */}
+          <tbody className="stagger-children">
+            {loading ? (
+              <>
+                {skeletonRows}
+                <tr><td colSpan={7} className="sr-only">加载中…</td></tr>
+              </>
+            ) : jobs.length === 0 ? (
               <tr>
                 <td colSpan={7} className="loading-line">
-                  {loading ? "加载中…" : "未找到匹配岗位"}
+                  未找到匹配岗位
                 </td>
               </tr>
             ) : (
@@ -307,7 +341,7 @@ export function JobsPage({ onNavigate }: { onNavigate: (page: string) => void })
         {totalPages > 1 && (
           <div className="pagination-row">
             <button
-              className="icon-text-button"
+              className="secondary-button"
               onClick={() => void refresh(page - 1)}
               disabled={loading || page <= 0}
             >
@@ -317,7 +351,7 @@ export function JobsPage({ onNavigate }: { onNavigate: (page: string) => void })
               第 {page + 1} / {totalPages} 页
             </span>
             <button
-              className="icon-text-button"
+              className="secondary-button"
               onClick={() => void refresh(page + 1)}
               disabled={loading || page >= totalPages - 1}
             >
@@ -376,11 +410,12 @@ export function JobsPage({ onNavigate }: { onNavigate: (page: string) => void })
                 </label>
               </div>
               <div className="button-row">
-                <button className="primary-button" onClick={() => void saveStatus()}>
+                {/* Task C: 保存状态为次要操作，生成简历为主操作 */}
+                <button className="secondary-button" onClick={() => void saveStatus()}>
                   {detail.user_status ? <BookmarkCheck size={17} /> : <BookmarkPlus size={17} />}
                   保存状态
                 </button>
-                <button className="icon-text-button" onClick={() => void clearStatus()} disabled={!detail.user_status}>
+                <button className="text-button" onClick={() => void clearStatus()} disabled={!detail.user_status}>
                   <X size={17} />
                   清除
                 </button>
@@ -424,12 +459,13 @@ export function JobsPage({ onNavigate }: { onNavigate: (page: string) => void })
                     </div>
                   ))}
                   <div className="draft-generate-row">
+                    {/* Task C: 生成简历草稿是本页主 CTA */}
                     <button
                       className="primary-button draft-generate-button"
                       onClick={() => void generateDraft()}
                       disabled={generatingDraft}
                     >
-                      <WandSparkles size={17} />
+                      {generatingDraft ? <ButtonSpinner /> : <WandSparkles size={17} />}
                       {generatingDraft ? "生成中…" : "生成简历草稿"}
                     </button>
                   </div>

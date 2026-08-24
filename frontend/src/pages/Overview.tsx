@@ -1,5 +1,6 @@
 import { Activity, ArrowRight, BriefcaseBusiness, Building2, CheckCircle2, DatabaseZap, FileText, MapPinned, RefreshCcw, ShieldCheck, UserRound } from "lucide-react";
 import { useEffect, useState } from "react";
+import { AnimatedNumber } from "../components/AnimatedNumber";
 import { useToast } from "../components/Toast";
 import { api } from "../lib/api";
 import { formatDate } from "../lib/format";
@@ -51,27 +52,56 @@ export function Overview({ onNavigate }: OverviewProps) {
         </button>
       </div>
 
-      <div className="metric-grid">
-        <button className="metric" onClick={() => onNavigate("jobs")}>
-          <BriefcaseBusiness size={20} />
-          <span>岗位</span>
-          <strong>{summary?.totals.jobs ?? 0}</strong>
-        </button>
-        <button className="metric" onClick={() => onNavigate("crawl")}>
-          <Building2 size={20} />
-          <span>机构</span>
-          <strong>{summary?.totals.institutions ?? 0}</strong>
-        </button>
-        <button className="metric" onClick={() => onNavigate("analytics")}>
-          <MapPinned size={20} />
-          <span>地区</span>
-          <strong>{summary?.totals.regions ?? 0}</strong>
-        </button>
-        <button className="metric accent" onClick={() => onNavigate("resume")}>
-          <Activity size={20} />
-          <span>高频能力</span>
-          <strong>{summary?.common_capabilities[0]?.name ?? "待抓取"}</strong>
-        </button>
+      {/* B4 + B5 + B6: Metric grid with stagger enter, animated numbers, and skeleton loading */}
+      <div className="metric-grid stagger-children">
+        {loading ? (
+          <>
+            <div className="metric" aria-hidden="true">
+              <BriefcaseBusiness size={20} />
+              <span>岗位</span>
+              <strong><span className="skeleton skeleton-text" style={{ width: "60%" }} /></strong>
+            </div>
+            <div className="metric" aria-hidden="true">
+              <Building2 size={20} />
+              <span>机构</span>
+              <strong><span className="skeleton skeleton-text" style={{ width: "50%" }} /></strong>
+            </div>
+            <div className="metric" aria-hidden="true">
+              <MapPinned size={20} />
+              <span>地区</span>
+              <strong><span className="skeleton skeleton-text" style={{ width: "50%" }} /></strong>
+            </div>
+            <div className="metric accent" aria-hidden="true">
+              <Activity size={20} />
+              <span>高频能力</span>
+              <strong><span className="skeleton skeleton-text" style={{ width: "70%" }} /></strong>
+            </div>
+            <span className="sr-only">加载中…</span>
+          </>
+        ) : (
+          <>
+            <button className="metric" onClick={() => onNavigate("jobs")}>
+              <BriefcaseBusiness size={20} />
+              <span>岗位</span>
+              <strong><AnimatedNumber value={summary?.totals.jobs ?? 0} /></strong>
+            </button>
+            <button className="metric" onClick={() => onNavigate("crawl")}>
+              <Building2 size={20} />
+              <span>机构</span>
+              <strong><AnimatedNumber value={summary?.totals.institutions ?? 0} /></strong>
+            </button>
+            <button className="metric" onClick={() => onNavigate("analytics")}>
+              <MapPinned size={20} />
+              <span>地区</span>
+              <strong><AnimatedNumber value={summary?.totals.regions ?? 0} /></strong>
+            </button>
+            <button className="metric accent" onClick={() => onNavigate("resume")}>
+              <Activity size={20} />
+              <span>高频能力</span>
+              <strong>{summary?.common_capabilities[0]?.name ?? "待抓取"}</strong>
+            </button>
+          </>
+        )}
       </div>
 
       <section className="panel launch-panel">
@@ -94,7 +124,8 @@ export function Overview({ onNavigate }: OverviewProps) {
             </button>
           ))}
         </div>
-        <div className="workflow-grid">
+        {/* B4: Workflow cards stagger enter */}
+        <div className="workflow-grid stagger-children">
           {steps.map((step, index) => (
             <button className={step.done ? "workflow-card done" : "workflow-card"} key={step.id} onClick={() => onNavigate(step.target)}>
               <div className="workflow-icon">
@@ -119,7 +150,7 @@ export function Overview({ onNavigate }: OverviewProps) {
           <h2>近期岗位</h2>
           <button className="text-button" onClick={() => onNavigate("jobs")}>查看岗位库</button>
         </div>
-        <div className="compact-list">
+        <div className="compact-list stagger-children">
           {jobs.length === 0 ? (
             <div className="empty-line">暂无岗位样本</div>
           ) : (

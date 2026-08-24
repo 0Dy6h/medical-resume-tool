@@ -1,18 +1,23 @@
 import { X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { ButtonSpinner } from "./ButtonSpinner";
 import { useToast } from "../components/Toast";
 import { api } from "../lib/api";
 import { validateSubscriptionForm, hasBroadKeywordWarning } from "../lib/subscriptionUtils";
 import type { Institution, Subscription } from "../types";
 
+const EXIT_DURATION = 120;
+
 export function CreateSubscriptionDialog({
   institutions,
   onClose,
-  onCreated
+  onCreated,
+  triggerRef
 }: {
   institutions: Institution[];
   onClose: () => void;
   onCreated: (sub: Subscription) => void;
+  triggerRef?: React.RefObject<HTMLElement>;
 }) {
   const toast = useToast();
   const [name, setName] = useState("");
@@ -23,14 +28,63 @@ export function CreateSubscriptionDialog({
   const [submitting, setSubmitting] = useState(false);
   const [createdSub, setCreatedSub] = useState<Subscription | null>(null);
   const [showWarning, setShowWarning] = useState(false);
+  const [exiting, setExiting] = useState(false);
+  const [warningExiting, setWarningExiting] = useState(false);
+  const nameInputRef = useRef<HTMLInputElement>(null);
+  const exitTimerRef = useRef<number | null>(null);
+  const warningExitTimerRef = useRef<number | null>(null);
+
+  // Focus first focusable element (name input) on mount
+  useEffect(() => {
+    nameInputRef.current?.focus();
+  }, []);
+
+  // Clean up timers on unmount
+  useEffect(() => {
+    return () => {
+      if (exitTimerRef.current !== null) {
+        window.clearTimeout(exitTimerRef.current);
+        exitTimerRef.current = null;
+      }
+      if (warningExitTimerRef.current !== null) {
+        window.clearTimeout(warningExitTimerRef.current);
+        warningExitTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  function handleClose() {
+    if (exiting) return;
+    setExiting(true);
+    exitTimerRef.current = window.setTimeout(() => {
+      // Return focus to trigger element if provided
+      triggerRef?.current?.focus();
+      onClose();
+    }, EXIT_DURATION);
+  }
+
+  function handleCloseWarning() {
+    if (warningExiting) return;
+    setWarningExiting(true);
+    warningExitTimerRef.current = window.setTimeout(() => {
+      setShowWarning(false);
+      setWarningExiting(false);
+    }, EXIT_DURATION);
+  }
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") {
+        if (showWarning && !warningExiting) {
+          handleCloseWarning();
+        } else if (!showWarning) {
+          handleClose();
+        }
+      }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [showWarning, warningExiting, exiting]);
 
   const enabledInstitutions = institutions.filter((i) => i.enabled);
 
@@ -80,7 +134,7 @@ export function CreateSubscriptionDialog({
       }
 
       onCreated(sub);
-      onClose();
+      handleClose();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "创建订阅失败");
     } finally {
@@ -92,17 +146,22 @@ export function CreateSubscriptionDialog({
     if (createdSub) {
       onCreated(createdSub);
     }
-    onClose();
+    handleCloseWarning();
+    // Close the main dialog after the warning dialog starts exiting
+    window.setTimeout(() => handleClose(), EXIT_DURATION / 2);
   }
 
   const error = validateSubscriptionForm({ name, keyword, institutionIds: selectedIds });
 
   return (
-    <div className="dialog-overlay" onClick={onClose}>
-      <div className="dialog" onClick={(e) => e.stopPropagation()}>
+    <div
+      className={`dialog-overlay${exiting ? " exiting" : ""}`}
+      onClick={handleClose}
+    >
+      <div className={`dialog${exiting ? " exiting" : ""}`} onClick={(e) => e.stopPropagation()}>
         <div className="dialog-header">
           <h2>新建订阅</h2>
-          <button className="icon-button" onClick={onClose} title="关闭">
+          <button className="icon-button" onClick={handleClose} title="关闭">
             <X size={18} />
           </button>
         </div>
@@ -110,6 +169,7 @@ export function CreateSubscriptionDialog({
           <div className="form-field">
             <label>订阅名称</label>
             <input
+              ref={nameInputRef}
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="例如：内科临床岗位"
@@ -157,18 +217,22 @@ export function CreateSubscriptionDialog({
             </span>
           </div>
           <div className="dialog-actions">
-            <button type="button" className="secondary-button" onClick={onClose} disabled={submitting}>
+            <button type="button" className="secondary-button" onClick={handleClose} disabled={submitting}>
               取消
             </button>
             <button type="submit" className="primary-button" disabled={submitting || !!error}>
+              {submitting && <ButtonSpinner />}
               {submitting ? "创建中…" : "创建订阅"}
             </button>
           </div>
         </form>
 
         {showWarning && (
-          <div className="dialog-overlay" onClick={() => setShowWarning(false)}>
-            <div className="dialog small" onClick={(e) => e.stopPropagation()}>
+          <div
+            className={`dialog-overlay${warningExiting ? " exiting" : ""}`}
+            onClick={handleCloseWarning}
+          >
+            <div className={`dialog small${warningExiting ? " exiting" : ""}`} onClick={(e) => e.stopPropagation()}>
               <div className="dialog-header">
                 <h3>订阅已创建</h3>
               </div>

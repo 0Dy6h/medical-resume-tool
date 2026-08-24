@@ -1,3 +1,4 @@
+import { AnimatedNumber } from "./AnimatedNumber";
 import { maxCount } from "../lib/format";
 
 type DataBarProps = {
@@ -12,7 +13,7 @@ export function DataBar({ title, items }: DataBarProps) {
       <div className="panel-head">
         <h2>{title}</h2>
       </div>
-      <div className="bar-list">
+      <div className="bar-list stagger-children">
         {items.length === 0 ? (
           <div className="empty-line">暂无数据</div>
         ) : (
@@ -22,7 +23,8 @@ export function DataBar({ title, items }: DataBarProps) {
               <div className="bar-track">
                 <span className="bar-fill" style={{ width: `${Math.max(8, (item.count / max) * 100)}%` }} />
               </div>
-              <span className="bar-count">{item.count}</span>
+              {/* B5: Animated number for bar count */}
+              <span className="bar-count"><AnimatedNumber value={item.count} /></span>
             </div>
           ))
         )}
@@ -30,4 +32,3 @@ export function DataBar({ title, items }: DataBarProps) {
     </section>
   );
 }
-

@@ -1,5 +1,6 @@
 import { CheckCircle2, ChevronLeft, ChevronRight, Download, FileDown, History, ListChecks, Pencil, RefreshCcw, Save, Trash2, WandSparkles } from "lucide-react";
 import { useEffect, useState } from "react";
+import { ButtonSpinner } from "../components/ButtonSpinner";
 import { useToast } from "../components/Toast";
 import { api, downloadBlob } from "../lib/api";
 import { evidenceSourceLabel, evidenceStrengthLabel, evidenceStrengthTone } from "../lib/resumeEvidence";
@@ -134,6 +135,7 @@ export function ResumePage() {
   const [jobId, setJobId] = useState<number | "">("");
   const [draft, setDraft] = useState<ResumeDraft | null>(null);
   const [loading, setLoading] = useState(false);
+  const [jobsLoading, setJobsLoading] = useState(true);
   const [saved, setSaved] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [exportConfirm, setExportConfirm] = useState<{ format: "docx" | "pdf"; mode: "application" | "diagnostic"; pending: number } | null>(null);
@@ -143,12 +145,15 @@ export function ResumePage() {
   const [draftHistory, setDraftHistory] = useState<ResumeDraftSummary[]>([]);
 
   async function refreshJobs() {
+    setJobsLoading(true);
     try {
       const payload = await api.jobs();
       setJobs(payload.items);
       if (!jobId && payload.items[0]) setJobId(payload.items[0].id);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "加载岗位失败");
+    } finally {
+      setJobsLoading(false);
     }
   }
 
@@ -370,6 +375,26 @@ export function ResumePage() {
       ? matchedEvidence.matched_terms.map(String)
       : [];
 
+  // B6: Skeleton for resume editor when loading/generating
+  const editorSkeleton = (
+    <section className="panel resume-editor" aria-hidden="true">
+      <div className="panel-head">
+        <div className="skeleton skeleton-title" />
+      </div>
+      <div className="section-editor-list stagger-children">
+        {Array.from({ length: 3 }, (_, i) => (
+          <div className="section-editor" key={`es-${i}`}>
+            <div className="skeleton skeleton-text" style={{ width: "40%", marginBottom: "10px" }} />
+            <div className="skeleton skeleton-text" style={{ width: "90%", marginBottom: "6px" }} />
+            <div className="skeleton skeleton-text" style={{ width: "85%", marginBottom: "6px" }} />
+            <div className="skeleton skeleton-text" style={{ width: "70%" }} />
+          </div>
+        ))}
+      </div>
+      <span className="sr-only">生成中…</span>
+    </section>
+  );
+
   return (
     <div className="page-stack">
       <div className="toolbar">
@@ -377,7 +402,7 @@ export function ResumePage() {
           <h1>简历生成</h1>
           <p className="subtle">岗位要求、履历证据、缺口提醒</p>
         </div>
-        <button className="icon-text-button" onClick={refreshJobs}>
+        <button className="secondary-button" onClick={refreshJobs}>
           <RefreshCcw size={17} />
           刷新岗位
         </button>
@@ -388,15 +413,22 @@ export function ResumePage() {
           <label>
             <span>目标岗位</span>
             <select value={jobId} onChange={(event) => setJobId(Number(event.target.value))}>
-              {jobs.map((job) => (
-                <option value={job.id} key={job.id}>
-                  {job.institution_name} / {job.title}
-                </option>
-              ))}
+              {jobsLoading ? (
+                <option value="">加载中…</option>
+              ) : jobs.length === 0 ? (
+                <option value="">暂无岗位</option>
+              ) : (
+                jobs.map((job) => (
+                  <option value={job.id} key={job.id}>
+                    {job.institution_name} / {job.title}
+                  </option>
+                ))
+              )}
             </select>
           </label>
-          <button className="primary-button" onClick={generate} disabled={loading || !jobId}>
-            <WandSparkles size={17} />
+          {/* Task C: 生成是本页主 CTA */}
+          <button className="primary-button" onClick={generate} disabled={loading || !jobId || jobsLoading}>
+            {loading ? <ButtonSpinner /> : <WandSparkles size={17} />}
             生成
           </button>
         </div>
@@ -407,7 +439,7 @@ export function ResumePage() {
           <div className="panel-head">
             <h2><History size={17} /> 历史版本</h2>
           </div>
-          <div className="compact-list">
+          <div className="compact-list stagger-children">
             {draftHistory.map((item) => (
               <button
                 key={item.id}
@@ -431,37 +463,53 @@ export function ResumePage() {
         </section>
       )}
 
-      {draft && (
+      {loading ? (
+        <div className="resume-layout">
+          {editorSkeleton}
+          <aside className="detail-panel">
+            <div className="skeleton skeleton-title" style={{ marginBottom: "16px" }} />
+            <div className="compact-list">
+              {Array.from({ length: 3 }, (_, i) => (
+                <div className="evidence-card" key={`ev-skel-${i}`}>
+                  <div className="skeleton skeleton-text" style={{ width: "60%", marginBottom: "8px" }} />
+                  <div className="skeleton skeleton-text" style={{ width: "100%" }} />
+                </div>
+              ))}
+            </div>
+            <span className="sr-only">生成中…</span>
+          </aside>
+        </div>
+      ) : draft && (
         <div className="resume-layout">
           <section className="panel resume-editor">
             <div className="panel-head">
               <h2>{draft.title}</h2>
               <div className="button-row">
                 {reviewMode ? (
-                  <button className="icon-text-button" onClick={exitReview}>
+                  <button className="secondary-button" onClick={exitReview}>
                     <Pencil size={17} />
                     退出审阅
                   </button>
                 ) : (
-                  <button className="icon-text-button" onClick={enterReview}>
+                  <button className="secondary-button" onClick={enterReview}>
                     <ListChecks size={17} />
                     分步审阅
                   </button>
                 )}
-                <button className="icon-text-button" onClick={saveDraft}>
+                <button className="secondary-button" onClick={saveDraft}>
                   <Save size={17} />
                   {saved ? "已保存" : "保存"}
                 </button>
-                <button className="icon-text-button" onClick={() => void exportDraft("docx")} disabled={exporting}>
-                  <Download size={17} />
+                <button className="secondary-button" onClick={() => void exportDraft("docx")} disabled={exporting}>
+                  {exporting ? <ButtonSpinner /> : <Download size={17} />}
                   {exporting ? "导出中..." : "投递 DOCX"}
                 </button>
-                <button className="icon-text-button" onClick={() => void exportDraft("pdf")} disabled={exporting}>
-                  <FileDown size={17} />
+                <button className="secondary-button" onClick={() => void exportDraft("pdf")} disabled={exporting}>
+                  {exporting ? <ButtonSpinner /> : <FileDown size={17} />}
                   {exporting ? "导出中..." : "投递 PDF"}
                 </button>
-                <button className="icon-text-button" onClick={() => void exportDraft("docx", "diagnostic")} disabled={exporting}>
-                  <Download size={17} />
+                <button className="text-button" onClick={() => void exportDraft("docx", "diagnostic")} disabled={exporting}>
+                  {exporting ? <ButtonSpinner /> : <Download size={17} />}
                   诊断 DOCX
                 </button>
               </div>
@@ -535,7 +583,7 @@ export function ResumePage() {
 
                     <div style={{ marginTop: "0.5rem", display: "flex", gap: "0.5rem" }}>
                       <button
-                        className="icon-text-button"
+                        className="secondary-button"
                         style={{ fontSize: "0.75rem" }}
                         onClick={() => {
                           setEditing(false);
@@ -546,7 +594,7 @@ export function ResumePage() {
                         采纳
                       </button>
                       <button
-                        className="icon-text-button"
+                        className="secondary-button"
                         style={{ fontSize: "0.75rem" }}
                         onClick={startEdit}
                       >
@@ -554,7 +602,7 @@ export function ResumePage() {
                         修改措辞
                       </button>
                       <button
-                        className="icon-text-button"
+                        className="text-button"
                         style={{ fontSize: "0.75rem" }}
                         onClick={() => {
                           setEditing(false);
@@ -569,14 +617,15 @@ export function ResumePage() {
                 )}
 
                 <div className="button-row" style={{ marginTop: "0.75rem" }}>
-                  <button className="icon-text-button" onClick={prev} disabled={currentIndex === 0}>
+                  <button className="secondary-button" onClick={prev} disabled={currentIndex === 0}>
                     <ChevronLeft size={17} />
                     上一项
                   </button>
-                  <button className="icon-text-button" onClick={next} disabled={currentIndex >= totalItems - 1}>
+                  <button className="secondary-button" onClick={next} disabled={currentIndex >= totalItems - 1}>
                     下一项
                     <ChevronRight size={17} />
                   </button>
+                  {/* Task C: 完成审阅是审阅模式下的主 CTA */}
                   <button className="primary-button" onClick={() => void completeReview()}>
                     <CheckCircle2 size={17} />
                     完成审阅
@@ -584,7 +633,7 @@ export function ResumePage() {
                 </div>
               </div>
             ) : (
-              <div className="section-editor-list">
+              <div className="section-editor-list stagger-children">
                 {draft.sections.map((section, sectionIndex) => (
                   <div className="section-editor" key={section.id}>
                     <input className="section-title-input" value={section.title} onChange={(event) => updateSectionTitle(sectionIndex, event.target.value)} />
@@ -653,7 +702,7 @@ export function ResumePage() {
               还有 {exportConfirm.pending} 项待确认。未审阅的草稿可能包含不完整或待修改的内容，是否继续导出？
             </p>
             <div className="button-row" style={{ justifyContent: "flex-end" }}>
-              <button className="icon-text-button" onClick={() => setExportConfirm(null)}>
+              <button className="secondary-button" onClick={() => setExportConfirm(null)}>
                 返回审阅
               </button>
               <button
@@ -661,6 +710,7 @@ export function ResumePage() {
                 onClick={() => void doExport(exportConfirm.format, exportConfirm.mode, true)}
                 disabled={exporting}
               >
+                {exporting && <ButtonSpinner />}
                 {exporting ? "导出中..." : "继续导出"}
               </button>
             </div>

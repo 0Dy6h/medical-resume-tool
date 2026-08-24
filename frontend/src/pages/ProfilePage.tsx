@@ -1,5 +1,6 @@
 import { ChevronDown, FileUp, Plus, Save, Sparkles, Trash2 } from "lucide-react";
 import { useRef, useEffect, useState, useMemo } from "react";
+import { ButtonSpinner } from "../components/ButtonSpinner";
 import { useToast } from "../components/Toast";
 import { api } from "../lib/api";
 import { demoProfile, emptyProfile } from "../lib/defaultProfile";
@@ -295,7 +296,9 @@ export function ProfilePage() {
   const [importError, setImportError] = useState<string | null>(null);
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
   const [deleteConfirm, setDeleteConfirm] = useState<{ config: CollectionConfig; index: number; count: number } | null>(null);
+  const [deleteExiting, setDeleteExiting] = useState(false);
   const [overlapConfirm, setOverlapConfirm] = useState(false);
+  const [overlapExiting, setOverlapExiting] = useState(false);
   const [assignedBlocks, setAssignedBlocks] = useState<Record<string, string>>({});
   const [blockAssignSelections, setBlockAssignSelections] = useState<Record<string, string>>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -524,6 +527,45 @@ export function ProfilePage() {
     setPreviewBasics((current) => ({ ...current, [key]: value }));
   }
 
+  const EXIT_DURATION = 120;
+
+  function closeDeleteDialog() {
+    if (deleteExiting) return;
+    setDeleteExiting(true);
+    window.setTimeout(() => {
+      setDeleteConfirm(null);
+      setDeleteExiting(false);
+    }, EXIT_DURATION);
+  }
+
+  function closeOverlapDialog() {
+    if (overlapExiting) return;
+    setOverlapExiting(true);
+    window.setTimeout(() => {
+      setOverlapConfirm(false);
+      setOverlapExiting(false);
+    }, EXIT_DURATION);
+  }
+
+  function confirmDelete() {
+    if (!deleteConfirm) return;
+    setDeleteExiting(true);
+    window.setTimeout(() => {
+      doRemoveItem(deleteConfirm.config, deleteConfirm.index);
+      setDeleteConfirm(null);
+      setDeleteExiting(false);
+    }, EXIT_DURATION);
+  }
+
+  function confirmOverlapAndSave() {
+    setOverlapExiting(true);
+    window.setTimeout(() => {
+      setOverlapConfirm(false);
+      setOverlapExiting(false);
+      void doSave();
+    }, EXIT_DURATION);
+  }
+
   return (
     <div className="page-stack">
       <div className="toolbar">
@@ -565,7 +607,7 @@ export function ProfilePage() {
             disabled={importing}
             title="支持 DOCX、PDF、TXT、Markdown 和常见图片"
           >
-            <FileUp size={17} />
+            {importing ? <ButtonSpinner /> : <FileUp size={17} />}
             {importing ? "解析中..." : "导入资料"}
           </button>
           <button className="icon-text-button" onClick={() => setProfile(demoProfile)}>
@@ -780,36 +822,48 @@ export function ProfilePage() {
                 </button>
               )}
             </div>
-            {!isCollapsed && (
-              <div className="repeat-list">
-                {items.map((item, index) => (
-                  <div className="repeat-item" key={String(item.id ?? index)}>
-                    <div className="repeat-fields">
-                      {config.fields.map((field) => (
-                        <label className={field.area ? "span-2" : ""} key={field.key}>
-                          <span>{field.label}</span>
-                          {field.area ? (
-                            <textarea value={textValue(item[field.key])} onChange={(event) => updateItem(config, index, field, event.target.value)} />
-                          ) : (
-                            <input value={textValue(item[field.key])} onChange={(event) => updateItem(config, index, field, event.target.value)} />
-                          )}
-                        </label>
-                      ))}
+            {/*
+              B10: Collapsible panel animation using grid-template-rows.
+              Why grid-template-rows instead of max-height:
+              - max-height requires hardcoding an approximate height or using a very large value
+              - with large max-height values, the closing animation has a visible delay
+                because it animates from the max-height down to 0, not the actual content height
+              - grid-template-rows: 0fr → 1fr animates the exact content height smoothly
+              - the inner wrapper div with min-height: 0 (set in CSS via .collapsible-content > *)
+                ensures content doesn't overflow when collapsed (0fr)
+            */}
+            <div className={`collapsible-content ${isCollapsed ? "" : "open"}`}>
+              <div>
+                <div className="repeat-list">
+                  {items.map((item, index) => (
+                    <div className="repeat-item" key={String(item.id ?? index)}>
+                      <div className="repeat-fields">
+                        {config.fields.map((field) => (
+                          <label className={field.area ? "span-2" : ""} key={field.key}>
+                            <span>{field.label}</span>
+                            {field.area ? (
+                              <textarea value={textValue(item[field.key])} onChange={(event) => updateItem(config, index, field, event.target.value)} />
+                            ) : (
+                              <input value={textValue(item[field.key])} onChange={(event) => updateItem(config, index, field, event.target.value)} />
+                            )}
+                          </label>
+                        ))}
+                      </div>
+                      <button className="icon-button danger-button" onClick={() => removeItem(config, index)} title="删除">
+                        <Trash2 size={17} />
+                      </button>
                     </div>
-                    <button className="icon-button danger-button" onClick={() => removeItem(config, index)} title="删除">
-                      <Trash2 size={17} />
-                    </button>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
-            )}
+            </div>
           </section>
         );
       })}
 
       {deleteConfirm && (
-        <div className="dialog-overlay" onClick={() => setDeleteConfirm(null)}>
-          <div className="dialog small" onClick={(e) => e.stopPropagation()}>
+        <div className={`dialog-overlay${deleteExiting ? " exiting" : ""}`} onClick={closeDeleteDialog}>
+          <div className={`dialog small${deleteExiting ? " exiting" : ""}`} onClick={(e) => e.stopPropagation()}>
             <div className="dialog-header">
               <h2>确认删除</h2>
             </div>
@@ -817,15 +871,12 @@ export function ProfilePage() {
               <p className="subtle">{formatDeleteWarning(deleteConfirm.count)}</p>
             </div>
             <div className="dialog-actions">
-              <button className="text-button" onClick={() => setDeleteConfirm(null)}>
+              <button className="text-button" onClick={closeDeleteDialog}>
                 取消
               </button>
               <button
                 className="primary-button"
-                onClick={() => {
-                  doRemoveItem(deleteConfirm.config, deleteConfirm.index);
-                  setDeleteConfirm(null);
-                }}
+                onClick={confirmDelete}
               >
                 确认删除
               </button>
@@ -835,8 +886,8 @@ export function ProfilePage() {
       )}
 
       {overlapConfirm && (
-        <div className="dialog-overlay" onClick={() => setOverlapConfirm(false)}>
-          <div className="dialog small" onClick={(e) => e.stopPropagation()}>
+        <div className={`dialog-overlay${overlapExiting ? " exiting" : ""}`} onClick={closeOverlapDialog}>
+          <div className={`dialog small${overlapExiting ? " exiting" : ""}`} onClick={(e) => e.stopPropagation()}>
             <div className="dialog-header">
               <h2>时间重叠提示</h2>
             </div>
@@ -844,15 +895,12 @@ export function ProfilePage() {
               <p className="subtle">{formatOverlapWarning()}</p>
             </div>
             <div className="dialog-actions">
-              <button className="text-button" onClick={() => setOverlapConfirm(false)}>
+              <button className="text-button" onClick={closeOverlapDialog}>
                 取消
               </button>
               <button
                 className="primary-button"
-                onClick={() => {
-                  setOverlapConfirm(false);
-                  void doSave();
-                }}
+                onClick={confirmOverlapAndSave}
               >
                 继续保存
               </button>
