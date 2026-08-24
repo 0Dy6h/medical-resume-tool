@@ -68,6 +68,7 @@ class Entry:
 @dataclass
 class SectionBlock:
     title: str
+    section_id: str
     entries: list[Entry]
 
 
@@ -190,6 +191,47 @@ def _format_period(period: str) -> str:
     return period
 
 
+# ─── B1: Bold decision + B3: PDF text normalization ─────────────────
+
+_EMOJI_RE = re.compile(
+    "["
+    "\U0001F600-\U0001F64F"  # emoticons
+    "\U0001F300-\U0001F5FF"  # symbols & pictographs
+    "\U0001F680-\U0001F6FF"  # transport & map symbols
+    "\U0001F1E0-\U0001F1FF"  # flags
+    "\U0001F900-\U0001F9FF"  # supplemental symbols
+    "\U00002600-\U000026FF"  # misc symbols (including 🏥 U+1F3E5)
+    "\U00002700-\U000027BF"  # dingbats
+    "]", flags=re.UNICODE)
+
+
+def _should_bold_main_line(entry: Entry, section_id: str) -> bool:
+    """B1: entry main line is bold unless target section or long no-period prose."""
+    main_text = entry.head or ""
+    if entry.role:
+        main_text = f"{main_text} · {entry.role}" if main_text else entry.role
+    return not (
+        section_id == "target"
+        or (not entry.period and len(main_text) > 24)
+    )
+
+
+def _normalize_pdf_text(text: str) -> str:
+    """B3: remove invisible characters and normalize whitespace for PDF rendering.
+
+    Only processes invisible/whitespace characters — visible text is unchanged.
+    """
+    text = text.replace("\u200B", "").replace("\uFEFF", "").replace("\u00AD", "")
+    text = text.replace("\t", " ")
+    text = text.replace("\u00A0", " ").replace("\u3000", " ")
+    if _EMOJI_RE.search(text):
+        logger.warning(
+            "Text contains emoji characters that may be missing from the PDF font: %s",
+            text[:60],
+        )
+    return text
+
+
 # ─── Resume doc builder ───────────────────────────────────────────────
 
 
@@ -251,6 +293,7 @@ def _build_resume_doc(draft: dict[str, Any], include_appendix: bool = False) -> 
                 entries.append(entry)
         blocks.append(SectionBlock(
             title=str(section.get("title", "")),
+            section_id=section_id,
             entries=entries,
         ))
 
@@ -473,25 +516,29 @@ def _add_docx_footer(document: Document) -> None:
     paragraph.add_run(" 页")
 
 
-def _render_docx_entry(document: Document, entry: Entry) -> None:
+def _render_docx_entry(document: Document, entry: Entry, section_id: str = "") -> None:
     has_main = bool(entry.head or entry.role or entry.period)
     if has_main:
         main = document.add_paragraph(style="ResumeEntry")
         main.paragraph_format.tab_stops.add_tab_stop(Mm(166), WD_TAB_ALIGNMENT.RIGHT)
         main.paragraph_format.space_after = Pt(2)
 
+        should_bold = _should_bold_main_line(entry, section_id)
+
         if entry.head:
             head_run = main.add_run(entry.head)
-            head_run.bold = bool(entry.details)
+            head_run.bold = should_bold
 
         if entry.role:
             sep = " · " if entry.head else ""
-            main.add_run(f"{sep}{entry.role}")
+            role_run = main.add_run(f"{sep}{entry.role}")
+            role_run.bold = should_bold
 
         if entry.period:
             main.add_run("\t")
             period_run = main.add_run(_format_period(entry.period))
             period_run.font.size = Pt(9.5)
+            period_run.bold = should_bold
 
     for detail in entry.details:
         d = document.add_paragraph(style="ResumeDetail")
@@ -553,7 +600,7 @@ def export_docx(draft: dict[str, Any], include_appendix: bool = False) -> bytes:
         title_run.font.size = Pt(12)
 
         for entry in block.entries:
-            _render_docx_entry(document, entry)
+            _render_docx_entry(document, entry, block.section_id)
 
     core_props = document.core_properties
     core_props.title = f"{header.name} 简历"
@@ -590,15 +637,17 @@ def _find_cjk_bold_font() -> Path | None:
     return None
 
 
-def _render_pdf_entry(pdf: FPDF, entry: Entry) -> None:
+def _render_pdf_entry(pdf: FPDF, entry: Entry, section_id: str = "") -> None:
     has_main = bool(entry.head or entry.role or entry.period)
 
     if has_main:
-        main_style = "B" if entry.details else ""
+        should_bold = _should_bold_main_line(entry, section_id)
+        main_style = "B" if should_bold else ""
         pdf.set_font("cjk", style=main_style, size=10.5)
-        head_text = entry.head or ""
+        head_text = _normalize_pdf_text(entry.head or "")
         if entry.role:
-            head_text = f"{head_text} · {entry.role}" if head_text else entry.role
+            role_text = _normalize_pdf_text(entry.role)
+            head_text = f"{head_text} · {role_text}" if head_text else role_text
 
         if entry.period:
             period_text = _format_period(entry.period)
@@ -626,13 +675,14 @@ def _render_pdf_entry(pdf: FPDF, entry: Entry) -> None:
 
     pdf.set_font("cjk", size=10)
     for detail in entry.details:
+        detail_text = _normalize_pdf_text(detail)
         bullet = "– "
         bullet_w = pdf.get_string_width(bullet)
         indent = max(bullet_w + 1, 4)
 
         pdf.set_x(pdf.l_margin)
         pdf.cell(indent, 5.6, bullet, new_x=XPos.RIGHT, new_y=YPos.TOP)
-        pdf.multi_cell(pdf.epw - indent, 5.6, detail, align="L",
+        pdf.multi_cell(pdf.epw - indent, 5.6, detail_text, align="L",
                        new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
     pdf.ln(2)
@@ -668,20 +718,20 @@ def export_pdf(draft: dict[str, Any], include_appendix: bool = False) -> bytes:
 
     # ── Header (D1 fix: reset cursor with new_x=XPos.LMARGIN) ──
     pdf.set_font("cjk", style="B", size=20)
-    pdf.multi_cell(pdf.epw, 8, header.name, align="C",
+    pdf.multi_cell(pdf.epw, 8, _normalize_pdf_text(header.name), align="C",
                    new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.ln(2)
 
     pdf.set_font("cjk", size=9.5)
     for line in header.contact_lines:
-        pdf.multi_cell(pdf.epw, 5, line, align="C",
+        pdf.multi_cell(pdf.epw, 5, _normalize_pdf_text(line), align="C",
                        new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
     if header.summary_lines:
         pdf.ln(3)
         pdf.set_font("cjk", size=10)
         for line in header.summary_lines:
-            pdf.multi_cell(pdf.epw, 5.6, line, align="L",
+            pdf.multi_cell(pdf.epw, 5.6, _normalize_pdf_text(line), align="L",
                            new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.ln(2)
 
@@ -696,13 +746,13 @@ def export_pdf(draft: dict[str, Any], include_appendix: bool = False) -> bytes:
 
         # Section title (D6 fix: bottom border line)
         pdf.set_font("cjk", style="B", size=12)
-        pdf.multi_cell(pdf.epw, 7, block.title, align="L",
+        pdf.multi_cell(pdf.epw, 7, _normalize_pdf_text(block.title), align="L",
                        new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         line_y = pdf.get_y()
         pdf.line(pdf.l_margin, line_y, pdf.w - pdf.r_margin, line_y)
         pdf.ln(2)
 
         for entry in block.entries:
-            _render_pdf_entry(pdf, entry)
+            _render_pdf_entry(pdf, entry, block.section_id)
 
     return bytes(pdf.output())

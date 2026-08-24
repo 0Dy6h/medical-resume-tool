@@ -16,7 +16,9 @@ from docx.oxml.ns import qn
 from docx.shared import Mm
 
 from app.services.exporter import (
+    _normalize_pdf_text,
     _parse_entry,
+    _should_bold_main_line,
     _strip_all,
     assert_lossless,
     build_export_filename,
@@ -628,3 +630,167 @@ class TestMultiParagraphSummary:
         assert "第二段自我介绍" in pdf_text, "second summary paragraph missing from PDF"
         assert "内科住院医师三年" in pdf_text
         assert "擅长糖尿病管理" in pdf_text
+
+
+# ─── B1: Bold logic tests ────────────────────────────────────────────
+
+
+def _find_run_bold(docx_bytes: bytes, text_fragment: str) -> bool | None:
+    """Find the bold property of the first run containing a text fragment."""
+    document = Document(io.BytesIO(docx_bytes))
+    for para in document.paragraphs:
+        for run in para.runs:
+            if text_fragment in run.text:
+                return run.bold
+    return None
+
+
+def _bold_draft() -> dict:
+    return {
+        "id": 1,
+        "title": "内科医师 定制简历",
+        "sections": [
+            {"id": "identity", "title": "个人信息", "items": [
+                {"text": "张三"},
+                {"text": "电话：13800000000"},
+            ]},
+            {"id": "target", "title": "求职目标", "items": [
+                {"text": "应聘内科医师岗位，期望在三甲医院工作"},
+            ]},
+            {"id": "education", "title": "教育背景", "items": [
+                {"text": "南方医科大学 / 硕士 / 内科学 / 2019-09-2022-06：循证医学训练"},
+            ]},
+            {"id": "skills", "title": "技能能力", "items": [
+                {"text": "SPSS"},
+                {"text": "临床研究"},
+            ]},
+        ],
+        "evidence": [],
+        "gaps": [],
+    }
+
+
+class TestBoldLogic:
+    """B1: entry main line is bold unless target section or long no-period prose."""
+
+    def test_should_bold_normal_entry_with_period(self):
+        entry = _parse_entry("南方医科大学 / 硕士 / 内科学 / 2019-09-2022-06：循证医学训练")
+        assert _should_bold_main_line(entry, "education") is True
+
+    def test_should_not_bold_target_section(self):
+        entry = _parse_entry("应聘内科医师岗位")
+        assert _should_bold_main_line(entry, "target") is False
+
+    def test_should_not_bold_long_no_period(self):
+        entry = _parse_entry("这是一段超过二十四个字符的描述文字用于测试不加粗的条目")
+        assert len(entry.head or "") > 24
+        assert _should_bold_main_line(entry, "experiences") is False
+
+    def test_should_bold_short_no_period(self):
+        entry = _parse_entry("SPSS")
+        assert _should_bold_main_line(entry, "skills") is True
+
+    def test_docx_education_entry_is_bold(self):
+        docx_bytes = export_docx(_bold_draft())
+        bold = _find_run_bold(docx_bytes, "南方医科大学")
+        assert bold is True, "education entry main line should be bold"
+
+    def test_docx_target_entry_not_bold(self):
+        docx_bytes = export_docx(_bold_draft())
+        bold = _find_run_bold(docx_bytes, "应聘内科医师")
+        assert bold is not True, "target entry main line should not be bold"
+
+    def test_docx_skills_entry_is_bold(self):
+        docx_bytes = export_docx(_bold_draft())
+        bold = _find_run_bold(docx_bytes, "SPSS")
+        assert bold is True, "skills entry main line should be bold"
+
+    def test_pdf_bold_export_succeeds(self):
+        pdf_bytes = export_pdf(_bold_draft())
+        assert pdf_bytes.startswith(b"%PDF")
+        assert len(pdf_bytes) > 500
+
+
+# ─── B3: Invisible character normalization tests ─────────────────────
+
+
+def _strip_for_comparison(s: str) -> str:
+    """Aggressive strip including invisible characters for content comparison."""
+    s = s.replace("\u200B", "").replace("\uFEFF", "").replace("\u00AD", "")
+    return _lossless_strip(s)
+
+
+def _draft_with_invisible_chars() -> dict:
+    return {
+        "id": 1,
+        "title": "测试 定制简历",
+        "sections": [
+            {"id": "identity", "title": "个人信息", "items": [
+                {"text": "测试\u200B用户"},
+                {"text": "电话：13800000000"},
+            ]},
+            {"id": "experiences", "title": "工作经历", "items": [
+                {"text": "南方医院\uFEFF / 住院医师 / 2022-07-2025-06：负责\u00A0病房\u3000管理\t工作"},
+            ]},
+            {"id": "skills", "title": "技能能力", "items": [
+                {"text": "临床研究🏥"},
+            ]},
+        ],
+        "evidence": [],
+        "gaps": [],
+    }
+
+
+class TestInvisibleCharacterNormalization:
+    """B3: invisible characters cleaned before PDF rendering; visible text preserved."""
+
+    def test_normalize_removes_zero_width_space(self):
+        assert _normalize_pdf_text("abc\u200Bdef") == "abcdef"
+
+    def test_normalize_removes_bom(self):
+        assert _normalize_pdf_text("\uFEFFabc") == "abc"
+
+    def test_normalize_removes_soft_hyphen(self):
+        assert _normalize_pdf_text("abc\u00ADdef") == "abcdef"
+
+    def test_normalize_tab_to_space(self):
+        assert _normalize_pdf_text("a\tb") == "a b"
+
+    def test_normalize_nbsp_to_space(self):
+        assert _normalize_pdf_text("a\u00A0b") == "a b"
+
+    def test_normalize_fullwidth_space_to_space(self):
+        assert _normalize_pdf_text("a\u3000b") == "a b"
+
+    def test_normalize_preserves_visible_text(self):
+        raw = "南方医院 / 住院医师 / 2022-07-2025-06：负责病房管理"
+        assert _normalize_pdf_text(raw) == raw
+
+    def test_export_with_invisible_chars_docx_succeeds(self):
+        draft = _draft_with_invisible_chars()
+        docx_bytes = export_docx(draft)
+        docx_text = _strip_for_comparison(_extract_docx_text(docx_bytes))
+        for section in draft["sections"]:
+            for item in section.get("items", []):
+                raw = str(item.get("text", ""))
+                stripped = _strip_for_comparison(raw)
+                assert stripped in docx_text, (
+                    f"item content not found in DOCX: {stripped!r}"
+                )
+
+    def test_export_with_invisible_chars_pdf_succeeds(self):
+        draft = _draft_with_invisible_chars()
+        pdf_bytes = export_pdf(draft)
+        assert pdf_bytes.startswith(b"%PDF")
+        assert len(pdf_bytes) > 500
+
+    def test_pdf_visible_text_preserved(self):
+        draft = _draft_with_invisible_chars()
+        pdf_text = _pdf_page_text(export_pdf(draft))
+        assert "南方医院" in pdf_text
+        assert "住院医师" in pdf_text
+        assert "负责" in pdf_text
+        assert "病房" in pdf_text
+        assert "管理" in pdf_text
+        assert "工作" in pdf_text
+        assert "临床研究" in pdf_text

@@ -18,8 +18,10 @@ Backend:
 
 ```powershell
 uv run --project backend pytest -q
-uv run --project backend uvicorn app.main:app --host 127.0.0.1 --port 8000
+cd backend; uv run --project . uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
+
+> **SQLite path note:** the database path is relative to the current working directory. From the repo root it uses `data/app.db`; from `backend/` it uses `backend/data/app.db`. The two paths do not share data.
 
 Frontend:
 
