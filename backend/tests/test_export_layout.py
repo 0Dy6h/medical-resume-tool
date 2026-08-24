@@ -159,7 +159,7 @@ class TestLosslessParsing:
         raw = "南方医科大学 / 硕士 / 内科学 / 2019-09-2022-06：循证医学训练；临床研究设计"
         entry = _parse_entry(raw)
         assert entry.head == "南方医科大学"
-        assert entry.role == "硕士 / 内科学"
+        assert entry.role == "硕士 · 内科学"
         assert entry.period == "2019-09-2022-06"
         assert entry.details == ["循证医学训练", "临床研究设计"]
         assert_lossless(raw, entry)
@@ -496,3 +496,135 @@ class TestFilename:
         header = content_disposition_header("resume-1.docx")
         assert 'filename="resume-1.docx"' in header
         assert "filename*=UTF-8''resume-1.docx" in header
+
+
+# ─── Whitespace robustness tests (P1 fix) ─────────────────────────────
+
+
+def _pdf_page_text(pdf_bytes: bytes) -> str:
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    text = doc[0].get_text("text")
+    doc.close()
+    return text
+
+
+class TestUnicodeWhitespaceRobustness:
+    """Entries containing Unicode whitespace (U+3000, U+00A0) must export
+    successfully without triggering AssertionError, and the original content
+    must appear intact in DOCX/PDF extracted text.
+    """
+
+    def _draft_with_item(self, text: str) -> dict:
+        return {
+            "id": 1,
+            "title": "内科医师 定制简历",
+            "sections": [
+                {
+                    "id": "identity",
+                    "title": "个人信息",
+                    "items": [
+                        {"text": "测试用户"},
+                        {"text": "电话：13800000000 ｜ 邮箱：test@example.com"},
+                    ],
+                },
+                {
+                    "id": "experiences",
+                    "title": "工作经历",
+                    "items": [{"text": text}],
+                },
+            ],
+            "evidence": [],
+            "gaps": [],
+        }
+
+    def test_fullwidth_space_u3000_export_succeeds(self):
+        """U+3000 (fullwidth space) must not cause export failure."""
+        raw = "南方医院 / 住院医师\u3000 / 2022-07-2025-06：负责病房管理"
+        draft = self._draft_with_item(raw)
+
+        docx_bytes = export_docx(draft)
+        docx_text = _extract_docx_text(docx_bytes)
+        assert "南方医院" in docx_text
+        assert "住院医师" in docx_text
+        assert "负责病房管理" in docx_text
+
+        pdf_text = _pdf_page_text(export_pdf(draft))
+        assert "南方医院" in pdf_text
+        assert "负责病房管理" in pdf_text
+
+    def test_nonbreaking_space_u00a0_export_succeeds(self):
+        """U+00A0 (NBSP) must not cause export failure."""
+        raw = "南方医院 / 住院医师\u00a0：负责病房管理"
+        draft = self._draft_with_item(raw)
+
+        docx_bytes = export_docx(draft)
+        docx_text = _extract_docx_text(docx_bytes)
+        assert "南方医院" in docx_text
+        assert "住院医师" in docx_text
+        assert "负责病房管理" in docx_text
+
+        pdf_text = _pdf_page_text(export_pdf(draft))
+        assert "南方医院" in pdf_text
+        assert "负责病房管理" in pdf_text
+
+    def test_lossless_passes_with_unicode_whitespace(self):
+        """assert_lossless itself must pass after _strip_all Unicode normalization."""
+        raw = "南方医院 / 住院医师\u3000 / 2022-07-2025-06：负责病房管理"
+        entry = _parse_entry(raw)
+        assert_lossless(raw, entry)  # must not raise
+
+        raw2 = "南方医院 / 住院医师\u00a0：负责病房管理"
+        entry2 = _parse_entry(raw2)
+        assert_lossless(raw2, entry2)  # must not raise
+
+
+# ─── Multi-paragraph summary tests (P2 fix) ──────────────────────────
+
+
+class TestMultiParagraphSummary:
+    """When the identity section contains multiple non-contact text paragraphs,
+    all of them must be rendered — not just the last one.
+    """
+
+    def _draft_with_multi_summary(self) -> dict:
+        return {
+            "id": 1,
+            "title": "内科医师 定制简历",
+            "sections": [
+                {
+                    "id": "identity",
+                    "title": "个人信息",
+                    "items": [
+                        {"text": "张三"},
+                        {"text": "电话：13800000000 ｜ 邮箱：test@example.com"},
+                        {"text": "第一段自我介绍：内科住院医师三年。"},
+                        {"text": "第二段自我介绍：擅长糖尿病管理。"},
+                    ],
+                },
+                {
+                    "id": "education",
+                    "title": "教育背景",
+                    "items": [
+                        {"text": "某医科大学 / 学士 / 临床医学 / 2014-09-2019-06：基础医学课程"},
+                    ],
+                },
+            ],
+            "evidence": [],
+            "gaps": [],
+        }
+
+    def test_both_summary_paragraphs_in_docx(self):
+        draft = self._draft_with_multi_summary()
+        docx_text = _extract_docx_text(export_docx(draft))
+        assert "第一段自我介绍" in docx_text, "first summary paragraph missing from DOCX"
+        assert "第二段自我介绍" in docx_text, "second summary paragraph missing from DOCX"
+        assert "内科住院医师三年" in docx_text
+        assert "擅长糖尿病管理" in docx_text
+
+    def test_both_summary_paragraphs_in_pdf(self):
+        draft = self._draft_with_multi_summary()
+        pdf_text = _pdf_page_text(export_pdf(draft))
+        assert "第一段自我介绍" in pdf_text, "first summary paragraph missing from PDF"
+        assert "第二段自我介绍" in pdf_text, "second summary paragraph missing from PDF"
+        assert "内科住院医师三年" in pdf_text
+        assert "擅长糖尿病管理" in pdf_text

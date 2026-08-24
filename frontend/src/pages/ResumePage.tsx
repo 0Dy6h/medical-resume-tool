@@ -479,7 +479,7 @@ export function ResumePage() {
             <span className="sr-only">生成中…</span>
           </aside>
         </div>
-      ) : draft && (
+      ) : draft ? (
         <div className="resume-layout">
           <section className="panel resume-editor">
             <div className="panel-head">
@@ -689,6 +689,14 @@ export function ResumePage() {
             </div>
           </aside>
         </div>
+      ) : (
+        <section className="panel">
+          <div className="empty-state">
+            <WandSparkles size={32} />
+            <p>选择目标岗位后点击「生成」，系统将基于您的履历和岗位要求生成定制简历草稿</p>
+            <span className="small">生成的草稿可编辑、审阅、导出 DOCX/PDF</span>
+          </div>
+        </section>
       )}
 
       {exportConfirm && (

@@ -75,7 +75,7 @@ class SectionBlock:
 class Header:
     name: str
     contact_lines: list[str]
-    summary: str | None
+    summary_lines: list[str]
 
 
 @dataclass
@@ -99,7 +99,8 @@ def _is_contact_line(text: str) -> bool:
 
 
 def _strip_all(s: str) -> str:
-    for ch in (" ", "/", "：", "；", "·", "—", "–", "\t", "\n", "\r"):
+    s = re.sub(r"\s+", "", s)
+    for ch in ("/", "：", "；", "·", "—", "–"):
         s = s.replace(ch, "")
     return s
 
@@ -128,7 +129,7 @@ def _parse_entry(text: str) -> Entry:
             if segments and _is_date_range(segments[-1]):
                 period = segments.pop()
             head = segments[0] if segments else None
-            role = " / ".join(segments[1:]) if len(segments) > 1 else None
+            role = " · ".join(segments[1:]) if len(segments) > 1 else None
             return Entry(head=head, role=role, period=period, details=[], raw=raw)
         if "；" in head_part:
             details = [d.strip() for d in head_part.split("；") if d.strip()]
@@ -152,7 +153,7 @@ def _parse_entry(text: str) -> Entry:
         period = segments.pop()
 
     head = segments[0] if segments else None
-    role = " / ".join(segments[1:]) if len(segments) > 1 else None
+    role = " · ".join(segments[1:]) if len(segments) > 1 else None
     return Entry(head=head, role=role, period=period, details=details, raw=raw)
 
 
@@ -194,26 +195,26 @@ def _format_period(period: str) -> str:
 
 def _build_header(identity: dict[str, Any] | None, draft: dict[str, Any]) -> Header:
     if not identity:
-        return Header(name=draft.get("title", ""), contact_lines=[], summary=None)
+        return Header(name=draft.get("title", ""), contact_lines=[], summary_lines=[])
 
     items = identity.get("items", [])
     texts = [str(item.get("text", "")).strip() for item in items if str(item.get("text", "")).strip()]
     if not texts:
-        return Header(name=draft.get("title", ""), contact_lines=[], summary=None)
+        return Header(name=draft.get("title", ""), contact_lines=[], summary_lines=[])
 
     name = texts[0]
     contact_lines: list[str] = []
-    summary: str | None = None
+    summary_lines: list[str] = []
     for text in texts[1:]:
         if _is_contact_line(text):
             contact_lines.append(text)
         else:
-            summary = text
+            summary_lines.append(text)
 
     return Header(
         name=name or draft.get("title", ""),
         contact_lines=contact_lines,
-        summary=summary,
+        summary_lines=summary_lines,
     )
 
 
@@ -237,7 +238,16 @@ def _build_resume_doc(draft: dict[str, Any], include_appendix: bool = False) -> 
                 entries.append(Entry(head=None, role=None, period=None, details=[text], raw=text))
             else:
                 entry = _parse_entry(text)
-                assert_lossless(text, entry)
+                try:
+                    assert_lossless(text, entry)
+                except AssertionError:
+                    logger.warning(
+                        "Lossless violation, falling back to raw line: %s", text
+                    )
+                    entry = Entry(
+                        head=None, role=None, period=None,
+                        details=[text], raw=text,
+                    )
                 entries.append(entry)
         blocks.append(SectionBlock(
             title=str(section.get("title", "")),
@@ -472,7 +482,7 @@ def _render_docx_entry(document: Document, entry: Entry) -> None:
 
         if entry.head:
             head_run = main.add_run(entry.head)
-            head_run.bold = True
+            head_run.bold = bool(entry.details)
 
         if entry.role:
             sep = " · " if entry.head else ""
@@ -523,10 +533,12 @@ def export_docx(draft: dict[str, Any], include_appendix: bool = False) -> bytes:
         contact_run.font.size = Pt(9.5)
         contact_run.font.color.rgb = _MUTED_COLOR
 
-    if header.summary:
+    for idx, line in enumerate(header.summary_lines):
         summary_para = document.add_paragraph()
         summary_para.paragraph_format.line_spacing = 1.4
-        summary_run = summary_para.add_run(header.summary)
+        if idx == 0:
+            summary_para.paragraph_format.space_before = Pt(6)
+        summary_run = summary_para.add_run(line)
         summary_run.font.size = Pt(10)
 
     for block in doc.blocks:
@@ -582,7 +594,8 @@ def _render_pdf_entry(pdf: FPDF, entry: Entry) -> None:
     has_main = bool(entry.head or entry.role or entry.period)
 
     if has_main:
-        pdf.set_font("cjk", style="B", size=10.5)
+        main_style = "B" if entry.details else ""
+        pdf.set_font("cjk", style=main_style, size=10.5)
         head_text = entry.head or ""
         if entry.role:
             head_text = f"{head_text} · {entry.role}" if head_text else entry.role
@@ -591,7 +604,7 @@ def _render_pdf_entry(pdf: FPDF, entry: Entry) -> None:
             period_text = _format_period(entry.period)
             pdf.set_font("cjk", size=9.5)
             period_w = pdf.get_string_width(period_text)
-            pdf.set_font("cjk", style="B", size=10.5)
+            pdf.set_font("cjk", style=main_style, size=10.5)
             head_w = pdf.get_string_width(head_text)
             avail = pdf.epw - period_w - 2
 
@@ -602,7 +615,7 @@ def _render_pdf_entry(pdf: FPDF, entry: Entry) -> None:
                 pdf.cell(pdf.epw, 5, period_text, align="R",
                          new_x=XPos.LMARGIN, new_y=YPos.NEXT)
             else:
-                pdf.set_font("cjk", style="B", size=10.5)
+                pdf.set_font("cjk", style=main_style, size=10.5)
                 pdf.cell(head_w, 5.5, head_text, new_x=XPos.RIGHT, new_y=YPos.TOP)
                 pdf.set_font("cjk", size=9.5)
                 pdf.cell(pdf.epw - head_w, 5.5, period_text, align="R",
@@ -664,10 +677,12 @@ def export_pdf(draft: dict[str, Any], include_appendix: bool = False) -> bytes:
         pdf.multi_cell(pdf.epw, 5, line, align="C",
                        new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
-    if header.summary:
+    if header.summary_lines:
+        pdf.ln(3)
         pdf.set_font("cjk", size=10)
-        pdf.multi_cell(pdf.epw, 5.6, header.summary, align="L",
-                       new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        for line in header.summary_lines:
+            pdf.multi_cell(pdf.epw, 5.6, line, align="L",
+                           new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.ln(2)
 
     # ── Sections ──
