@@ -238,12 +238,137 @@ def test_drawer_esc(page) -> dict:
     }
 
 
+def test_fixed_positioning(page) -> dict:
+    """Test that fixed-position elements are correctly viewport-relative.
+
+    Checks at 1440px viewport:
+    1. Drawer bottom <= window.innerHeight
+    2. .drawer-body fits viewport and can scroll when content overflows
+    3. Create-subscription dialog overlay covers entire viewport
+    """
+    page.set_viewport_size({"width": 1440, "height": 900})
+    page.wait_for_timeout(600)
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(400)
+
+    page.wait_for_selector("table tbody tr[tabindex]", timeout=10000)
+    page.wait_for_timeout(300)
+
+    result: dict = {
+        "drawer_bottom_ok": False,
+        "drawer_scroll_ok": False,
+        "dialog_overlay_ok": False,
+    }
+
+    # --- 1 & 2: Open drawer, check bottom + body scroll ---
+    page.evaluate(
+        "() => { const r = document.querySelector('table tbody tr[tabindex]'); if (r) r.click(); }"
+    )
+    try:
+        page.wait_for_selector(".detail-drawer.open", timeout=5000)
+        page.wait_for_timeout(400)
+    except Exception:
+        return result
+
+    drawer_bottom = page.evaluate(
+        """() => {
+            const el = document.querySelector('.detail-drawer.open');
+            if (!el) return null;
+            const r = el.getBoundingClientRect();
+            return { top: Math.round(r.top), bottom: Math.round(r.bottom), height: Math.round(r.height) };
+        }"""
+    )
+    vh = page.viewport_size["height"]
+    result["drawer_bottom"] = drawer_bottom
+    result["vh"] = vh
+    result["drawer_bottom_ok"] = (
+        drawer_bottom is not None and drawer_bottom["bottom"] <= vh
+    )
+
+    scroll_test = page.evaluate(
+        """() => {
+            const el = document.querySelector('.detail-drawer.open .drawer-body');
+            if (!el) return null;
+            const vh = window.innerHeight;
+            const bodyFits = el.clientHeight <= vh;
+            const hasOverflow = el.scrollHeight > el.clientHeight;
+            let scrollWorks = true;
+            if (hasOverflow) {
+                const before = el.scrollTop;
+                el.scrollTop = 50;
+                scrollWorks = el.scrollTop !== before;
+                el.scrollTop = before;
+            }
+            return {
+                clientHeight: Math.round(el.clientHeight),
+                scrollHeight: Math.round(el.scrollHeight),
+                viewportHeight: vh,
+                bodyFitsViewport: bodyFits,
+                hasOverflow: hasOverflow,
+                scrollWorks: scrollWorks,
+            };
+        }"""
+    )
+    result["scroll_test"] = scroll_test
+    result["drawer_scroll_ok"] = (
+        scroll_test is not None
+        and scroll_test["bodyFitsViewport"]
+        and (not scroll_test["hasOverflow"] or scroll_test["scrollWorks"])
+    )
+
+    # Close drawer
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(400)
+
+    # --- 3: Open Create-subscription dialog, check overlay ---
+    page.click(".subscriptions-panel button:has-text('新建')")
+    try:
+        page.wait_for_selector(".dialog-overlay", timeout=5000)
+        page.wait_for_timeout(300)
+    except Exception:
+        result["dialog_bounds"] = None
+        return result
+
+    dialog_bounds = page.evaluate(
+        """() => {
+            const overlay = document.querySelector('.dialog-overlay');
+            const dialog = document.querySelector('.dialog');
+            if (!overlay || !dialog) return null;
+            const vh = window.innerHeight;
+            const vw = window.innerWidth;
+            const o = overlay.getBoundingClientRect();
+            const d = dialog.getBoundingClientRect();
+            return {
+                overlay: { top: Math.round(o.top), bottom: Math.round(o.bottom), left: Math.round(o.left), right: Math.round(o.right), width: Math.round(o.width), height: Math.round(o.height) },
+                dialog: { top: Math.round(d.top), bottom: Math.round(d.bottom), left: Math.round(d.left), right: Math.round(d.right), width: Math.round(d.width), height: Math.round(d.height) },
+                viewportHeight: vh,
+                viewportWidth: vw,
+                overlayCoversViewport: o.top <= 0 && o.bottom >= vh && o.left <= 0 && o.right >= vw,
+                dialogFitsViewport: d.bottom <= vh,
+            };
+        }"""
+    )
+    result["dialog_bounds"] = dialog_bounds
+    result["dialog_overlay_ok"] = (
+        dialog_bounds is not None
+        and dialog_bounds["overlayCoversViewport"]
+        and dialog_bounds["dialogFitsViewport"]
+    )
+
+    # Close dialog
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(400)
+
+    return result
+
+
 def main() -> None:
     token = register_and_login()
     print(f"Registered and logged in as '{TEST_USERNAME}'")
 
     results: list[dict] = []
     esc_result: dict | None = None
+    fixed_result: dict | None = None
 
     try:
         with sync_playwright() as p:
@@ -273,6 +398,7 @@ def main() -> None:
                 results.append(result)
                 if width == 1440:
                     esc_result = test_drawer_esc(page)
+                    fixed_result = test_fixed_positioning(page)
 
             browser.close()
     finally:
@@ -333,6 +459,28 @@ def main() -> None:
             f"(drawer gone: {esc_result['drawer_gone']}, focus returned: {esc_result['focus_returned']})"
         )
         if not esc_ok:
+            all_pass = False
+
+    if fixed_result:
+        db = fixed_result.get("drawer_bottom")
+        st = fixed_result.get("scroll_test")
+        dg = fixed_result.get("dialog_bounds")
+        print(f"  [1440px] Drawer bottom <= vh:    {'PASS' if fixed_result['drawer_bottom_ok'] else 'FAIL'} "
+              f"(bottom={db['bottom'] if db else '-'}, vh={fixed_result.get('vh', '-')})")
+        if st:
+            print(f"  [1440px] Drawer-body scrollable: {'PASS' if fixed_result['drawer_scroll_ok'] else 'FAIL'} "
+                  f"(clientH={st['clientHeight']}, scrollH={st['scrollHeight']}, "
+                  f"fits={st['bodyFitsViewport']}, overflow={st['hasOverflow']}, scrollWorks={st['scrollWorks']})")
+        if dg:
+            print(f"  [1440px] Dialog overlay covers:  {'PASS' if fixed_result['dialog_overlay_ok'] else 'FAIL'} "
+                  f"(overlay top={dg['overlay']['top']} bottom={dg['overlay']['bottom']} "
+                  f"left={dg['overlay']['left']} right={dg['overlay']['right']}, "
+                  f"dialog bottom={dg['dialog']['bottom']}, vh={dg['viewportHeight']})")
+        if not fixed_result["drawer_bottom_ok"]:
+            all_pass = False
+        if not fixed_result["drawer_scroll_ok"]:
+            all_pass = False
+        if not fixed_result["dialog_overlay_ok"]:
             all_pass = False
 
     print(f"\nOverall: {'ALL PASS' if all_pass else 'FAILURES DETECTED'}")

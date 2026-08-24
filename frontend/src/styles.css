@@ -2434,12 +2434,12 @@ pre {
   }
   to {
     opacity: 1;
-    transform: translateY(0);
+    transform: none;
   }
 }
 
 .page-enter {
-  animation: page-enter var(--dur-base) var(--ease-out) both;
+  animation: page-enter var(--dur-base) var(--ease-out) backwards;
 }
 
 /* === List/table enter animation (B4) === */
@@ -2450,7 +2450,7 @@ pre {
   }
   to {
     opacity: 1;
-    transform: translateY(0);
+    transform: none;
   }
 }
 
