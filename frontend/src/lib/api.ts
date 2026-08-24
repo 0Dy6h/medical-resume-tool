@@ -198,7 +198,7 @@ export const api = {
     format: "docx" | "pdf",
     mode: "application" | "diagnostic" = "application",
     override = false,
-  ) => {
+  ): Promise<{ blob: Blob; filename: string | null }> => {
     const params = new URLSearchParams({ format, mode, override: String(override) });
     const response = await fetch(`${API_BASE}/api/resume-drafts/${draftId}/export?${params}`, {
       method: "POST",
@@ -210,9 +210,25 @@ export const api = {
       throw new UnauthorizedError();
     }
     if (!response.ok) throw new Error(await errorMessage(response, "导出失败"));
-    return response.blob();
+    const filename = parseContentDispositionFilename(response.headers.get("Content-Disposition"));
+    return { blob: await response.blob(), filename };
   }
 };
+
+export function parseContentDispositionFilename(disposition: string | null): string | null {
+  if (!disposition) return null;
+  const starMatch = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+  if (starMatch) {
+    try {
+      return decodeURIComponent(starMatch[1]);
+    } catch {
+      return starMatch[1];
+    }
+  }
+  const plainMatch = disposition.match(/filename="?([^";]+)"?/i);
+  if (plainMatch) return plainMatch[1].trim();
+  return null;
+}
 
 export function downloadBlob(blob: Blob, fileName: string) {
   const url = URL.createObjectURL(blob);

@@ -43,7 +43,7 @@ from app.services.analytics import analytics_summary, generate_report
 from app.services.auth import hash_password, make_token, verify_password, verify_token
 from app.services.crawler import execute_crawl_run
 from app.services.database import DatabaseEngine, create_engine, init_db
-from app.services.exporter import export_docx, export_pdf
+from app.services.exporter import build_export_filename, content_disposition_header, export_docx, export_pdf
 from app.services.jd_structurer import structure_jd_from_job
 from app.services.profile_import import ProfileImportError, build_profile_contract, extract_profile_text
 from app.services.repositories import (
@@ -480,26 +480,27 @@ def create_app(database_url: str | None = None) -> FastAPI:
             raise HTTPException(status_code=422, detail="导出内容为空，请至少保留一项内容后再导出")
 
         include_appendix = mode == "diagnostic"
+        ext = "docx" if format == "docx" else "pdf"
         if format == "docx":
             try:
                 content = export_docx(export_draft, include_appendix=include_appendix)
             except Exception:
                 logger.exception("export_docx failed (draft_id=%s, format=%s)", draft_id, format)
                 raise HTTPException(status_code=500, detail="文件生成失败，请稍后重试") from None
-            return Response(
-                content=content,
-                media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                headers={"Content-Disposition": f'attachment; filename="resume-{draft_id}.docx"'},
-            )
-        try:
-            content = export_pdf(export_draft, include_appendix=include_appendix)
-        except Exception:
-            logger.exception("export_pdf failed (draft_id=%s, format=%s)", draft_id, format)
-            raise HTTPException(status_code=500, detail="文件生成失败，请稍后重试") from None
+            media_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        else:
+            try:
+                content = export_pdf(export_draft, include_appendix=include_appendix)
+            except Exception:
+                logger.exception("export_pdf failed (draft_id=%s, format=%s)", draft_id, format)
+                raise HTTPException(status_code=500, detail="文件生成失败，请稍后重试") from None
+            media_type = "application/pdf"
+
+        filename = build_export_filename(export_draft, ext, mode)
         return Response(
             content=content,
-            media_type="application/pdf",
-            headers={"Content-Disposition": f'attachment; filename="resume-{draft_id}.pdf"'},
+            media_type=media_type,
+            headers={"Content-Disposition": content_disposition_header(filename)},
         )
 
     # ── Subscriptions (PRD 4.1) ────────────────────────────────────────

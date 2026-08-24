@@ -245,8 +245,8 @@ export function ResumePage() {
     setExportConfirm(null);
     try {
       await saveDraft();
-      const blob = await api.exportResume(draft.id, format, mode, override);
-      downloadBlob(blob, `resume-${draft.id}-${mode}.${format}`);
+      const { blob, filename } = await api.exportResume(draft.id, format, mode, override);
+      downloadBlob(blob, filename ?? `resume-${draft.id}-${mode}.${format}`);
       toast.success(`已导出 ${format.toUpperCase()}`);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "导出失败");
