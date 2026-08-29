@@ -215,6 +215,8 @@ def create_app(database_url: str | None = None) -> FastAPI:
         education: str | None = None,
         institution_type: str | None = None,
         tag: str | None = None,
+        trust: Annotated[str, Query(pattern="^(real|placeholder|fixture|disabled|all)$")] = "all",
+        fresh_days: Annotated[int | None, Query(ge=1)] = None,
         limit: Annotated[int, Query(ge=1, le=500)] = 100,
         offset: Annotated[int, Query(ge=0)] = 0,
     ) -> dict:
@@ -228,6 +230,8 @@ def create_app(database_url: str | None = None) -> FastAPI:
                 "education": education,
                 "institution_type": institution_type,
                 "tag": tag,
+                "trust": None if trust == "all" else trust,
+                "fresh_days": fresh_days,
                 "limit": limit,
                 "offset": offset,
             },
@@ -316,6 +320,7 @@ def create_app(database_url: str | None = None) -> FastAPI:
         region: str | None = None,
         job_category: str | None = None,
         institution_type: str | None = None,
+        trust: Annotated[str, Query(pattern="^(real|placeholder|fixture|disabled|all)$")] = "all",
     ) -> dict:
         return analytics_summary(
             engine,
@@ -323,6 +328,7 @@ def create_app(database_url: str | None = None) -> FastAPI:
                 "region": region,
                 "job_category": job_category,
                 "institution_type": institution_type,
+                "trust": None if trust == "all" else trust,
             },
         )
 

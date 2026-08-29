@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from app.services.database import (
@@ -16,6 +16,30 @@ from app.schemas import Profile
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+# ── 数据可信度分级（A1）─────────────────────────────────────────────
+# real：真实适配器产出且机构当前启用；
+# placeholder：generic 占位解析器产出（正文为占位文本，需人工复核）；
+# fixture：内置演示数据；
+# disabled：机构已禁用，其历史数据降级为历史档案。
+FIXTURE_PARSERS = frozenset({"fixture-v1"})
+PLACEHOLDER_PARSERS = frozenset({"generic-list-v1", "generic-page-v1"})
+
+
+def classify_job_trust(parser_name: str | None, institution_enabled: bool) -> str:
+    if not institution_enabled:
+        return "disabled"
+    if parser_name in FIXTURE_PARSERS:
+        return "fixture"
+    if parser_name in PLACEHOLDER_PARSERS:
+        return "placeholder"
+    return "real"
+
+
+def enabled_institution_ids(conn: Any) -> set[int]:
+    rows = conn.execute("SELECT id FROM institutions WHERE enabled = 1").fetchall()
+    return {int(row["id"]) for row in rows}
 
 
 def list_institutions(engine: DatabaseEngine) -> list[dict[str, Any]]:
@@ -203,10 +227,14 @@ def mark_institution(engine: DatabaseEngine, institution_id: int, status: str, e
         conn.commit()
 
 
-def _inflate_job(item: dict[str, Any]) -> dict[str, Any]:
+def _inflate_job(item: dict[str, Any], enabled_ids: set[int] | None = None) -> dict[str, Any]:
     item["tags"] = from_json(item.get("tags"), [])
     item["extraction_evidence"] = from_json(item.get("extraction_evidence"), {})
     item.setdefault("user_status", None)
+    if enabled_ids is not None:
+        item["data_trust"] = classify_job_trust(
+            item.get("parser_name"), int(item["institution_id"]) in enabled_ids
+        )
     return item
 
 
@@ -234,6 +262,24 @@ def build_jobs_where_clause(filters: dict[str, Any]) -> tuple[str, list[Any]]:
     if tag:
         clauses.append("tags LIKE ?")
         params.append(f"%{tag}%")
+    trust = filters.get("trust")
+    if trust == "real":
+        clauses.append(f"parser_name NOT IN ({','.join('?' * (len(FIXTURE_PARSERS) + len(PLACEHOLDER_PARSERS)))})")
+        params.extend(sorted(FIXTURE_PARSERS | PLACEHOLDER_PARSERS))
+        clauses.append("institution_id IN (SELECT id FROM institutions WHERE enabled = 1)")
+    elif trust == "placeholder":
+        clauses.append(f"parser_name IN ({','.join('?' * len(PLACEHOLDER_PARSERS))})")
+        params.extend(sorted(PLACEHOLDER_PARSERS))
+    elif trust == "fixture":
+        clauses.append(f"parser_name IN ({','.join('?' * len(FIXTURE_PARSERS))})")
+        params.extend(sorted(FIXTURE_PARSERS))
+    elif trust == "disabled":
+        clauses.append("institution_id IN (SELECT id FROM institutions WHERE enabled = 0)")
+    fresh_days = filters.get("fresh_days")
+    if fresh_days:
+        threshold = (datetime.now(timezone.utc) - timedelta(days=int(fresh_days))).isoformat()
+        clauses.append("fetched_at >= ?")
+        params.append(threshold)
     where = "WHERE " + " AND ".join(clauses) if clauses else ""
     assert where.count("?") == len(params), "Param count mismatch"
     return where, params
@@ -282,7 +328,8 @@ def list_jobs(engine: DatabaseEngine, filters: dict[str, Any], user_id: int | No
             f"SELECT * FROM jobs {where} ORDER BY fetched_at DESC, id DESC LIMIT ? OFFSET ?",
             params + [limit, offset]
         ).fetchall()
-    items = [_inflate_job(dict(row)) for row in rows]
+        enabled_ids = enabled_institution_ids(conn)
+    items = [_inflate_job(dict(row), enabled_ids) for row in rows]
     return {
         "total": total,
         "items": _attach_job_statuses(engine, items, user_id),
@@ -294,9 +341,10 @@ def list_jobs(engine: DatabaseEngine, filters: dict[str, Any], user_id: int | No
 def get_job(engine: DatabaseEngine, job_id: int, user_id: int | None = None) -> dict[str, Any]:
     with connect(engine) as conn:
         row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
-    if row is None:
-        raise KeyError(job_id)
-    job = _inflate_job(dict(row))
+        if row is None:
+            raise KeyError(job_id)
+        enabled_ids = enabled_institution_ids(conn)
+    job = _inflate_job(dict(row), enabled_ids)
     return _attach_job_statuses(engine, [job], user_id)[0]
 
 

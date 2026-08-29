@@ -21,6 +21,7 @@ export function AnalyticsPage({ onNavigate }: AnalyticsPageProps) {
   const [loading, setLoading] = useState(false);
   const [reporting, setReporting] = useState(false);
   const [activeTab, setActiveTab] = useState<TabId>("market");
+  const [trust, setTrust] = useState("all");
   const parserQuality = summary?.parser_quality ?? [];
   const reviewParserCount = parserQuality.filter((item) => item.review_status === "review").length;
   const totalJobs = summary?.totals.jobs ?? 0;
@@ -29,7 +30,7 @@ export function AnalyticsPage({ onNavigate }: AnalyticsPageProps) {
   async function refresh() {
     setLoading(true);
     try {
-      setSummary(await api.analytics());
+      setSummary(await api.analytics(trust));
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "加载分析数据失败");
     } finally {
@@ -51,7 +52,7 @@ export function AnalyticsPage({ onNavigate }: AnalyticsPageProps) {
 
   useEffect(() => {
     void refresh();
-  }, []);
+  }, [trust]);
 
   // B6: Skeleton for metric grid
   const metricSkeleton = (
@@ -133,6 +134,18 @@ export function AnalyticsPage({ onNavigate }: AnalyticsPageProps) {
               数据质量
             </button>
           </div>
+          <select
+            value={trust}
+            onChange={(event) => setTrust(event.target.value)}
+            title="数据可信度过滤"
+            aria-label="数据可信度过滤"
+          >
+            <option value="all">全部数据</option>
+            <option value="real">仅真实数据</option>
+            <option value="placeholder">占位·待复核</option>
+            <option value="fixture">演示数据</option>
+            <option value="disabled">禁用机构历史</option>
+          </select>
           <button className="secondary-button" onClick={refresh} disabled={loading}>
             <RefreshCcw size={17} />
             刷新
@@ -153,8 +166,8 @@ export function AnalyticsPage({ onNavigate }: AnalyticsPageProps) {
 
       {totalJobs === 0 && !loading ? (
         <section className="empty-state">
-          <p>暂无数据，请先执行一次爬取任务</p>
-          {onNavigate && (
+          <p>当前可信度切片下暂无数据{trust === "all" ? "，请先执行一次爬取任务" : "，可切换其他可信度切片查看"}</p>
+          {onNavigate && trust === "all" && (
             <button className="primary-button" onClick={() => onNavigate("crawl")}>
               前往抓取任务
             </button>
@@ -170,6 +183,13 @@ export function AnalyticsPage({ onNavigate }: AnalyticsPageProps) {
               <div className="metric"><span>解析器</span><strong><AnimatedNumber value={summary?.totals.parsers ?? 0} /></strong></div>
               <div className="metric accent"><span>需复核解析器</span><strong><AnimatedNumber value={reviewParserCount} /></strong></div>
             </div>
+          )}
+
+          {trust === "all" && (summary?.trust_breakdown?.length ?? 0) > 0 && (
+            <p className="subtle">
+              样本构成：{summary!.trust_breakdown!.map((item) => `${trustBreakdownLabel(item.name)} ${item.count} 条`).join("，")}
+              （默认含全部数据，可用右上角筛选切换可信度切片）
+            </p>
           )}
 
           <div className="analysis-grid">
@@ -270,6 +290,16 @@ export function formatGeneratedAt(iso: string): string {
   const hh = String(d.getHours()).padStart(2, "0");
   const min = String(d.getMinutes()).padStart(2, "0");
   return `${yyyy}-${mm}-${dd} ${hh}:${min}`;
+}
+
+export function trustBreakdownLabel(name: string): string {
+  const labels: Record<string, string> = {
+    real: "真实",
+    placeholder: "占位待复核",
+    fixture: "演示",
+    disabled: "禁用机构历史",
+  };
+  return labels[name] ?? name;
 }
 
 function extractReportBody(html: string): string {

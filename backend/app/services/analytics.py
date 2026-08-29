@@ -6,7 +6,13 @@ from typing import Any
 
 from app.config import config
 from app.services.database import DatabaseEngine, connect, from_json
-from app.services.repositories import build_jobs_where_clause, now_iso, save_report
+from app.services.repositories import (
+    build_jobs_where_clause,
+    classify_job_trust,
+    enabled_institution_ids,
+    now_iso,
+    save_report,
+)
 
 
 LOW_CONFIDENCE_THRESHOLD = config.low_confidence_threshold
@@ -97,6 +103,21 @@ def analytics_summary(engine: DatabaseEngine, filters: dict[str, Any] | None = N
             )
 
     parser_quality = _parser_quality_payload(parser_stats)
+    trust_counter: Counter = Counter()
+    with connect(engine) as conn:
+        trust_rows = conn.execute(
+            f"""
+            SELECT parser_name, institution_id, COUNT(*) AS count
+            FROM jobs {where}
+            GROUP BY parser_name, institution_id
+            """,
+            params,
+        ).fetchall()
+        enabled_ids = enabled_institution_ids(conn)
+    for row in trust_rows:
+        trust_counter[
+            classify_job_trust(row["parser_name"], int(row["institution_id"]) in enabled_ids)
+        ] += row["count"]
     return {
         "generated_at": now_iso(),
         "totals": {
@@ -118,6 +139,7 @@ def analytics_summary(engine: DatabaseEngine, filters: dict[str, Any] | None = N
             for institution, counter in sorted(focus.items())
         ],
         "parser_quality": parser_quality,
+        "trust_breakdown": _counter_payload(trust_counter),
     }
 
 

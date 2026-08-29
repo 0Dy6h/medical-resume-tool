@@ -2694,3 +2694,31 @@ pre {
     grid-template-rows: 1fr;
   }
 }
+
+.trust-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.trust-placeholder {
+  background: var(--amber-soft);
+  color: var(--amber);
+}
+
+.trust-fixture {
+  background: var(--blue-soft);
+  color: var(--blue);
+}
+
+.trust-disabled {
+  background: var(--red-soft);
+  color: var(--red);
+}

@@ -54,6 +54,7 @@ export type Job = {
   fetched_at: string;
   parser_name: string;
   confidence: number;
+  data_trust?: "real" | "placeholder" | "fixture" | "disabled";
   user_status?: JobUserStatus | null;
   match?: JobMatch | null;
 };
@@ -128,6 +129,7 @@ export type AnalyticsSummary = {
     focus: CountItem[];
   }>;
   parser_quality: ParserQuality[];
+  trust_breakdown?: CountItem[];
   generated_at?: string;
 };
 

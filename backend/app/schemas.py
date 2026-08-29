@@ -350,6 +350,7 @@ class JobOut(BaseModel):
     fetched_at: str
     parser_name: str
     confidence: float
+    data_trust: str = "real"
     user_status: dict[str, Any] | None = None
     match: dict[str, Any] | None = None
 
@@ -376,6 +377,7 @@ class AnalyticsSummary(BaseModel):
     common_capabilities: list[dict[str, Any]]
     institution_focus: list[dict[str, Any]]
     parser_quality: list[dict[str, Any]]
+    trust_breakdown: list[dict[str, Any]] = []
     generated_at: str | None = None
 
 

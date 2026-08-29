@@ -8,7 +8,7 @@ import { useToast } from "../components/Toast";
 import { useAuth } from "../components/AuthContext";
 import { api } from "../lib/api";
 import { formatDate } from "../lib/format";
-import { foldTags } from "../lib/jobUtils";
+import { foldTags, trustBadge } from "../lib/jobUtils";
 import { findingLabel, findingTone } from "../lib/matchAnalysis";
 import type { Institution, Job, JobDetail, JobMatch } from "../types";
 
@@ -85,6 +85,9 @@ export function JobsPage({ onNavigate }: { onNavigate: (page: string) => void })
   const [region, setRegion] = useState("");
   const [institutionType, setInstitutionType] = useState("");
   const [education, setEducation] = useState("");
+  // U2 数据防线：默认只看真实数据（启用机构 + 真实解析器 + 近 90 天）
+  const [trust, setTrust] = useState("real");
+  const [freshDays, setFreshDays] = useState("90");
   const [regions, setRegions] = useState<string[]>([]);
   const [institutionTypes, setInstitutionTypes] = useState<string[]>([]);
   const [institutions, setInstitutions] = useState<Institution[]>([]);
@@ -121,6 +124,8 @@ export function JobsPage({ onNavigate }: { onNavigate: (page: string) => void })
         region,
         institution_type: institutionType,
         education,
+        trust,
+        fresh_days: trust === "real" && freshDays ? freshDays : undefined,
         limit: PAGE_SIZE,
         offset: targetPage * PAGE_SIZE,
       });
@@ -301,6 +306,20 @@ export function JobsPage({ onNavigate }: { onNavigate: (page: string) => void })
               <option key={item} value={item}>{item}</option>
             ))}
           </select>
+          <select value={trust} onChange={(event) => setTrust(event.target.value)} title="数据可信度">
+            <option value="real">真实数据</option>
+            <option value="placeholder">占位·待复核</option>
+            <option value="fixture">演示数据</option>
+            <option value="disabled">禁用机构历史</option>
+            <option value="all">全部数据</option>
+          </select>
+          {trust === "real" && (
+            <select value={freshDays} onChange={(event) => setFreshDays(event.target.value)} title="新鲜度窗口">
+              <option value="30">近 30 天</option>
+              <option value="90">近 90 天</option>
+              <option value="">全部时间</option>
+            </select>
+          )}
           <button className="secondary-button" onClick={search}>
             <Search size={17} />
             查询
@@ -349,6 +368,11 @@ export function JobsPage({ onNavigate }: { onNavigate: (page: string) => void })
                   <td title={job.title}>
                     <div className="job-title-cell">
                       {freshTag && <span className={`freshness-badge freshness-${freshTag}`}>{freshTag}</span>}
+                      {trustBadge(job.data_trust) && (
+                        <span className={`trust-badge trust-${trustBadge(job.data_trust)!.tone}`}>
+                          {trustBadge(job.data_trust)!.label}
+                        </span>
+                      )}
                       <strong>{job.title}</strong>
                     </div>
                   </td>
@@ -456,6 +480,13 @@ export function JobsPage({ onNavigate }: { onNavigate: (page: string) => void })
             {detail.confidence < 0.6 && (
               <div className="match-warning-bar">
                 该职位由系统自动解析，部分信息可能存在误差，建议点击原始链接核对
+              </div>
+            )}
+            {trustBadge(detail.data_trust) && (
+              <div className="match-warning-bar">
+                {detail.data_trust === "placeholder" && "该记录由通用列表解析器抽取，正文为占位内容，不代表真实岗位详情，请以原始链接为准"}
+                {detail.data_trust === "fixture" && "该记录为内置演示数据，仅用于功能演示，不代表真实招聘信息"}
+                {detail.data_trust === "disabled" && "该机构已禁用适配，此记录为历史数据，可能已失效"}
               </div>
             )}
             <div className="fact-grid">
