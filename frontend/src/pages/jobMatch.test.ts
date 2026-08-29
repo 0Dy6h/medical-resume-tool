@@ -1,5 +1,26 @@
 import { describe, expect, it } from "vitest";
-import { canGenerateDraft, computeMatchLabel, freshnessTag } from "./JobsPage";
+import { canGenerateDraft, computeMatchLabel, freshnessTag, planDetailSync } from "./JobsPage";
+
+describe("planDetailSync — 筛选/翻页后详情与列表保持一致", () => {
+  const items = [{ id: 1 }, { id: 2 }, { id: 3 }];
+
+  it("选中岗位仍在当前结果页 → 保留详情", () => {
+    expect(planDetailSync(2, items)).toEqual({ keep: true, clear: false, loadFirst: false });
+  });
+
+  it("筛选后选中岗位不在结果中 → 同步为第一条，禁止残留旧岗位详情", () => {
+    expect(planDetailSync(99, items)).toEqual({ keep: false, clear: false, loadFirst: true });
+  });
+
+  it("筛选结果为空 → 清空详情", () => {
+    expect(planDetailSync(1, [])).toEqual({ keep: false, clear: true, loadFirst: false });
+    expect(planDetailSync(null, [])).toEqual({ keep: false, clear: true, loadFirst: false });
+  });
+
+  it("首次加载（无选中岗位）→ 加载第一条", () => {
+    expect(planDetailSync(null, items)).toEqual({ keep: false, clear: false, loadFirst: true });
+  });
+});
 
 describe("computeMatchLabel", () => {
   it("returns none when match is null", () => {

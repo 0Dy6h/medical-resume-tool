@@ -59,6 +59,23 @@ export function canGenerateDraft(matchAnalysis: unknown): boolean {
   return matchAnalysis != null;
 }
 
+/**
+ * 刷新岗位列表（筛选/翻页）后，详情面板与当前列表必须保持一致：
+ * - 选中的岗位仍在当前页 → 保留；
+ * - 不在当前页 → 同步为当前页第一条（或列表为空时清空），避免“列表是岗位 B、详情还是岗位 A”。
+ */
+export type DetailSyncPlan = { keep: boolean; clear: boolean; loadFirst: boolean };
+
+export function planDetailSync(detailId: number | null, items: Array<{ id: number }>): DetailSyncPlan {
+  if (detailId != null && items.some((job) => job.id === detailId)) {
+    return { keep: true, clear: false, loadFirst: false };
+  }
+  if (items.length === 0) {
+    return { keep: false, clear: true, loadFirst: false };
+  }
+  return { keep: false, clear: false, loadFirst: true };
+}
+
 export function JobsPage({ onNavigate }: { onNavigate: (page: string) => void }) {
   const PAGE_SIZE = 50;
   const toast = useToast();
@@ -110,7 +127,11 @@ export function JobsPage({ onNavigate }: { onNavigate: (page: string) => void })
       setJobs(payload.items);
       setTotal(payload.total);
       setPage(targetPage);
-      if (payload.items.length && !detail) {
+      const plan = planDetailSync(detail?.id ?? null, payload.items);
+      if (plan.clear) {
+        setDetail(null);
+        syncStatusForm(null);
+      } else if (plan.loadFirst) {
         const firstDetail = await api.job(payload.items[0].id);
         setDetail(firstDetail);
         syncStatusForm(firstDetail);

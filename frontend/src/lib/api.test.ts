@@ -1,5 +1,43 @@
-import { describe, expect, it } from "vitest";
-import { parseContentDispositionFilename } from "./api";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { api, parseContentDispositionFilename } from "./api";
+
+describe("request — 204/空响应体处理", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function stubFetch(status: number, body?: string) {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(body ?? null, { status }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("localStorage", {
+      getItem: () => null,
+      setItem: () => {},
+      removeItem: () => {},
+    });
+    return fetchMock;
+  }
+
+  it("删除订阅返回 204 无响应体时不抛错（回归：不再报 JSON 解析错误）", async () => {
+    const fetchMock = stubFetch(204);
+    await expect(api.deleteSubscription(7)).resolves.toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(init.method).toBe("DELETE");
+  });
+
+  it("200 但空响应体同样安全返回 undefined", async () => {
+    stubFetch(200, "");
+    await expect(api.deleteSubscription(7)).resolves.toBeUndefined();
+  });
+
+  it("正常 JSON 响应仍被解析", async () => {
+    stubFetch(200, JSON.stringify([{ id: 1 }]));
+    await expect(api.subscriptions()).resolves.toEqual([{ id: 1 }]);
+  });
+});
+
 
 describe("parseContentDispositionFilename", () => {
   it("parses plain filename", () => {

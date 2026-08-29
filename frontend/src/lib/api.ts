@@ -67,7 +67,11 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   if (!response.ok) {
     throw new Error(await errorMessage(response, `Request failed: ${response.status}`));
   }
-  return (await response.json()) as T;
+  // 204 No Content（及约定外的空响应体）：直接返回 undefined，不再解析 JSON。
+  if (response.status === 204) return undefined as T;
+  const text = await response.text();
+  if (!text) return undefined as T;
+  return JSON.parse(text) as T;
 }
 
 async function errorMessage(response: Response, fallback: string): Promise<string> {

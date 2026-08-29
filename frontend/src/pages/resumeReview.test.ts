@@ -1,6 +1,21 @@
 import { describe, it, expect } from "vitest";
-import { flattenReviewItems, computeDraftStatus, reviewTone, filterExportSections, exportBlock, readPendingDraftId, PENDING_DRAFT_KEY, isUnlinkedReviewItem } from "./ResumePage";
+import { flattenReviewItems, computeDraftStatus, reviewTone, filterExportSections, exportBlock, readPendingDraftId, PENDING_DRAFT_KEY, isUnlinkedReviewItem, shouldResetDraftOnJobChange } from "./ResumePage";
 import type { ResumeSection } from "../types";
+
+describe("shouldResetDraftOnJobChange — 切岗时草稿上下文必须跟随选择器", () => {
+  it("草稿属于其他岗位 → 需清除（禁止显示岗位 B 却导出岗位 A 草稿）", () => {
+    expect(shouldResetDraftOnJobChange(2, { job_id: 1 })).toBe(true);
+  });
+
+  it("草稿就属于目标岗位 → 保留", () => {
+    expect(shouldResetDraftOnJobChange(2, { job_id: 2 })).toBe(false);
+  });
+
+  it("无草稿或岗位未选中 → 不需要清除", () => {
+    expect(shouldResetDraftOnJobChange(2, null)).toBe(false);
+    expect(shouldResetDraftOnJobChange("", { job_id: 1 })).toBe(false);
+  });
+});
 
 const sampleSections: ResumeSection[] = [
   {

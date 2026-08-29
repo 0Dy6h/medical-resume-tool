@@ -113,6 +113,19 @@ export function readPendingDraftId(storage: { getItem: (key: string) => string |
   return Number.isFinite(id) && id > 0 ? id : null;
 }
 
+/**
+ * 切换目标岗位时，当前显示的草稿若属于其他岗位，必须清除，
+ * 禁止“选择器已切到岗位 B，页面仍显示/导出岗位 A 的草稿”。
+ */
+export function shouldResetDraftOnJobChange(
+  nextJobId: number | "",
+  draft: { job_id: number } | null,
+): boolean {
+  if (draft == null) return false;
+  if (nextJobId === "") return false;
+  return draft.job_id !== nextJobId;
+}
+
 // ── Review card colours (matching PRD 4.4 prototype) ────────────────
 
 const TONE_STYLES: Record<"green" | "yellow" | "red", { bg: string; border: string; color: string; label: string }> = {
@@ -213,13 +226,33 @@ export function ResumePage() {
     }
   }
 
-  async function saveDraft() {
-    if (!draft) return;
-    const payload = await api.updateResumeDraft(draft.id, draft.sections);
-    setDraft(payload);
-    setSaved(true);
-    window.setTimeout(() => setSaved(false), 1500);
-    void refreshDraftHistory(jobId);
+  async function saveDraft(): Promise<boolean> {
+    if (!draft) return false;
+    try {
+      const payload = await api.updateResumeDraft(draft.id, draft.sections);
+      setDraft(payload);
+      setSaved(true);
+      window.setTimeout(() => setSaved(false), 1500);
+      void refreshDraftHistory(jobId);
+      return true;
+    } catch (error) {
+      // 保存失败不丢内容：本地编辑保留在 state 中，仅提示失败原因。
+      toast.error(error instanceof Error ? `${error.message}（已编辑内容已保留，可重试保存）` : "保存失败，已编辑内容已保留，可重试保存");
+      return false;
+    }
+  }
+
+  function handleJobSelect(next: number) {
+    if (next === jobId) return;
+    if (shouldResetDraftOnJobChange(next, draft) &&
+        !window.confirm("当前显示的是其他岗位的草稿，切换后将清除显示（历史版本仍可从「历史版本」恢复），确定切换吗？")) {
+      return;
+    }
+    setJobId(next);
+    setDraft(null);
+    setReviewMode(false);
+    setEditing(false);
+    setCurrentIndex(0);
   }
 
   async function loadHistoricalDraft(draftId: number) {
@@ -249,7 +282,11 @@ export function ResumePage() {
     setExporting(true);
     setExportConfirm(null);
     try {
-      await saveDraft();
+      const savedOk = await saveDraft();
+      if (!savedOk) {
+        toast.info("导出已中止：草稿保存失败，请先重试保存");
+        return;
+      }
       const { blob, filename } = await api.exportResume(draft.id, format, mode, override);
       downloadBlob(blob, filename ?? `resume-${draft.id}-${mode}.${format}`);
       toast.success(`已导出 ${format.toUpperCase()}`);
@@ -412,7 +449,7 @@ export function ResumePage() {
         <div className="generator-row">
           <label>
             <span>目标岗位</span>
-            <select value={jobId} onChange={(event) => setJobId(Number(event.target.value))}>
+            <select value={jobId} onChange={(event) => handleJobSelect(Number(event.target.value))}>
               {jobsLoading ? (
                 <option value="">加载中…</option>
               ) : jobs.length === 0 ? (
