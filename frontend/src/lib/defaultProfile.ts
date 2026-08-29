@@ -63,3 +63,20 @@ export const demoProfile: Profile = {
   mode: "experienced"
 };
 
+/**
+ * 演示数据签名：姓名 / 电话 / 邮箱三项同时等于示例值即判定为演示数据。
+ * 138-0000-0000 / linxiao@example.com 为虚构示例专属值，真实档案不可能命中。
+ * 用途：示例加载后的「演示数据」横幅 + 保存前的二次确认（B4 防呆）。
+ */
+const DEMO_SIGNATURE_KEYS = ["name", "phone", "email"] as const;
+
+export function matchesDemoProfile(profile: Profile): boolean {
+  const basics = profile.basics ?? {};
+  const demoBasics = demoProfile.basics ?? {};
+  return DEMO_SIGNATURE_KEYS.every((key) => {
+    const value = String(basics[key] ?? "").trim();
+    const demoValue = String(demoBasics[key] ?? "").trim();
+    return value !== "" && value === demoValue;
+  });
+}
+

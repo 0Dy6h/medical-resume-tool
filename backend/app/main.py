@@ -43,7 +43,13 @@ from app.services.analytics import analytics_summary, generate_report
 from app.services.auth import hash_password, make_token, verify_password, verify_token
 from app.services.crawler import execute_crawl_run
 from app.services.database import DatabaseEngine, create_engine, init_db
-from app.services.exporter import build_export_filename, content_disposition_header, export_docx, export_pdf
+from app.services.exporter import (
+    build_export_filename,
+    collect_unlinked_items,
+    content_disposition_header,
+    export_docx,
+    export_pdf,
+)
 from app.services.jd_structurer import structure_jd_from_job
 from app.services.profile_import import ProfileImportError, build_profile_contract, extract_profile_text
 from app.services.repositories import (
@@ -479,6 +485,19 @@ def create_app(database_url: str | None = None) -> FastAPI:
             raise HTTPException(status_code=409, detail=f"草稿尚未审阅完成，还有 {pending} 项待确认")
 
         export_draft = _draft_for_export(draft)
+
+        # 409: application 模式下存在未绑定档案证据的内容 —— 需显式确认后才允许导出。
+        # 诊断模式不受此限制：无证据条目在附录中被明确标注，而非静默进入投递版。
+        if mode == "application" and not override:
+            unlinked = collect_unlinked_items(export_draft)
+            if unlinked:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f"导出内容中有 {len(unlinked)} 项未关联档案证据（可能为手动添加），"
+                        "请逐项确认内容真实无误后再导出"
+                    ),
+                )
 
         # 422: empty content — enforced regardless of override.
         export_items = [item for section in export_draft["sections"] for item in section.get("items", [])]

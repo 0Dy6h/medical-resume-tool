@@ -3,7 +3,7 @@ import { useRef, useEffect, useState, useMemo } from "react";
 import { ButtonSpinner } from "../components/ButtonSpinner";
 import { useToast } from "../components/Toast";
 import { api } from "../lib/api";
-import { demoProfile, emptyProfile } from "../lib/defaultProfile";
+import { demoProfile, emptyProfile, matchesDemoProfile } from "../lib/defaultProfile";
 import { mergeImportSelection } from "../lib/importMerge";
 import { formatDeleteWarning, formatOverlapWarning, shouldShowDeleteWarning, shouldShowOverlapWarning } from "../lib/profileChecks";
 import type { Profile, ProfileImportResult } from "../types";
@@ -299,6 +299,8 @@ export function ProfilePage() {
   const [deleteExiting, setDeleteExiting] = useState(false);
   const [overlapConfirm, setOverlapConfirm] = useState(false);
   const [overlapExiting, setOverlapExiting] = useState(false);
+  const [demoLoadConfirm, setDemoLoadConfirm] = useState(false);
+  const [demoSaveConfirm, setDemoSaveConfirm] = useState(false);
   const [assignedBlocks, setAssignedBlocks] = useState<Record<string, string>>({});
   const [blockAssignSelections, setBlockAssignSelections] = useState<Record<string, string>>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -351,6 +353,15 @@ export function ProfilePage() {
   }
 
   async function save() {
+    // B4 防呆：演示数据不得在未确认的情况下写入正式档案。
+    if (matchesDemoProfile(profile)) {
+      setDemoSaveConfirm(true);
+      return;
+    }
+    await runSaveChecks();
+  }
+
+  async function runSaveChecks() {
     try {
       const result = await api.checkOverlap(profile);
       if (shouldShowOverlapWarning(result)) {
@@ -361,6 +372,18 @@ export function ProfilePage() {
       // If the overlap check fails, proceed with save directly
     }
     await doSave();
+  }
+
+  function loadDemoProfile() {
+    setDemoLoadConfirm(false);
+    setProfile(demoProfile);
+    const layout = MODE_LAYOUT[demoProfile.mode ?? "experienced"];
+    const collapsed = new Set<string>();
+    layout.forEach((item: { key: keyof Profile; collapsed?: boolean }) => {
+      if (item.collapsed) collapsed.add(String(item.key));
+    });
+    setCollapsedSections(collapsed);
+    toast.info("已载入演示数据（虚构示例），请勿保存为正式档案");
   }
 
   async function doSave() {
@@ -610,7 +633,7 @@ export function ProfilePage() {
             {importing ? <ButtonSpinner /> : <FileUp size={17} />}
             {importing ? "解析中..." : "导入资料"}
           </button>
-          <button className="icon-text-button" onClick={() => setProfile(demoProfile)}>
+          <button className="icon-text-button" onClick={() => setDemoLoadConfirm(true)}>
             <Sparkles size={17} />
             示例
           </button>
@@ -620,6 +643,15 @@ export function ProfilePage() {
           </button>
         </div>
       </div>
+
+      {matchesDemoProfile(profile) && (
+        <section className="panel form-panel demo-banner" role="status">
+          <strong>当前编辑的是演示数据</strong>
+          <span className="subtle">
+            姓名 / 电话 / 邮箱均为虚构示例（林晓），请替换为您的真实信息后再保存，否则保存前会再次要求确认。
+          </span>
+        </section>
+      )}
 
       {(importError || (preview && importExtractionEmpty(preview))) && (
         <section className="panel form-panel">
@@ -903,6 +935,52 @@ export function ProfilePage() {
                 onClick={confirmOverlapAndSave}
               >
                 继续保存
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {demoLoadConfirm && (
+        <div className="dialog-overlay">
+          <div className="dialog small">
+            <div className="dialog-header">
+              <h2>载入演示数据？</h2>
+            </div>
+            <div className="dialog-body">
+              <p className="subtle">
+                演示数据为虚构人物（林晓 / 138-0000-0000），将覆盖当前正在编辑的内容。它仅用于体验功能，请勿保存为正式档案或用于投递导出。
+              </p>
+            </div>
+            <div className="dialog-actions">
+              <button className="text-button" onClick={() => setDemoLoadConfirm(false)}>
+                取消
+              </button>
+              <button className="primary-button" onClick={loadDemoProfile}>
+                载入演示数据
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {demoSaveConfirm && (
+        <div className="dialog-overlay">
+          <div className="dialog small">
+            <div className="dialog-header">
+              <h2>演示数据将被保存为正式档案</h2>
+            </div>
+            <div className="dialog-body">
+              <p className="subtle">
+                当前档案的姓名 / 电话 / 邮箱仍是虚构演示数据，保存后将写入正式档案，并可能进入简历草稿与导出文件。确定要保存吗？
+              </p>
+            </div>
+            <div className="dialog-actions">
+              <button className="text-button" onClick={() => setDemoSaveConfirm(false)}>
+                返回修改
+              </button>
+              <button className="primary-button" onClick={() => { setDemoSaveConfirm(false); void runSaveChecks(); }}>
+                仍要保存
               </button>
             </div>
           </div>

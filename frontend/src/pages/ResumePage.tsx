@@ -83,6 +83,38 @@ export function exportBlock(sections: ResumeSection[]): ExportGuardResult {
   return { kind: "confirm", pending };
 }
 
+export type ReviewCompletion =
+  | { kind: "complete" }
+  | { kind: "blocked"; pending: number; firstPendingIndex: number };
+
+/**
+ * B3：完成审阅的门禁 —— 存在未决策条目时禁止完成，
+ * 并定位到第一个待确认条目。旧版「自动补 adopt」行为已废除。
+ */
+export function reviewCompletion(sections: ResumeSection[]): ReviewCompletion {
+  let pending = 0;
+  let firstPendingIndex = -1;
+  flattenReviewItems(sections).forEach((item, index) => {
+    if (item.decision !== "adopt" && item.decision !== "edit" && item.decision !== "remove") {
+      pending += 1;
+      if (firstPendingIndex < 0) firstPendingIndex = index;
+    }
+  });
+  return pending === 0
+    ? { kind: "complete" }
+    : { kind: "blocked", pending, firstPendingIndex };
+}
+
+/**
+ * B3：投递版导出前统计将随导出、但未绑定档案证据的条目数
+ * （身份 / 求职意向 / 缺口提醒区块不计入，已删除条目不计入）。
+ */
+export function unlinkedExportCount(sections: ResumeSection[]): number {
+  return flattenReviewItems(sections).filter(
+    (item) => item.decision !== "remove" && isUnlinkedReviewItem(item, item.sectionId),
+  ).length;
+}
+
 const UNLINKED_SKIP_SECTION_IDS = new Set([
   "identity",
   "target",
@@ -151,7 +183,12 @@ export function ResumePage() {
   const [jobsLoading, setJobsLoading] = useState(true);
   const [saved, setSaved] = useState(false);
   const [exporting, setExporting] = useState(false);
-  const [exportConfirm, setExportConfirm] = useState<{ format: "docx" | "pdf"; mode: "application" | "diagnostic"; pending: number } | null>(null);
+  const [exportConfirm, setExportConfirm] = useState<{
+    format: "docx" | "pdf";
+    mode: "application" | "diagnostic";
+    reason: "pending" | "unlinked";
+    pending: number;
+  } | null>(null);
   const [reviewMode, setReviewMode] = useState(false);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [editing, setEditing] = useState(false);
@@ -271,8 +308,16 @@ export function ResumePage() {
     if (!draft) return;
     const guard = exportBlock(draft.sections);
     if (guard.kind === "confirm") {
-      setExportConfirm({ format, mode, pending: guard.pending });
+      setExportConfirm({ format, mode, reason: "pending", pending: guard.pending });
       return;
+    }
+    // B3：投递版导出前，未绑定档案证据的条目必须显式确认（后端另有 409 兜底）。
+    if (mode === "application") {
+      const unlinked = unlinkedExportCount(draft.sections);
+      if (unlinked > 0) {
+        setExportConfirm({ format, mode, reason: "unlinked", pending: unlinked });
+        return;
+      }
     }
     await doExport(format, mode, false);
   }
@@ -295,6 +340,22 @@ export function ResumePage() {
     } finally {
       setExporting(false);
     }
+  }
+
+  /**
+   * 确认「未审阅」后不直接导出：若同时存在无证据条目，继续走第二道确认，
+   * 与后端两道独立 409 护栏保持一致，避免一次确认放行两道闸。
+   */
+  function confirmExportOverride() {
+    if (!exportConfirm) return;
+    if (exportConfirm.reason === "pending" && exportConfirm.mode === "application" && draft) {
+      const unlinked = unlinkedExportCount(draft.sections);
+      if (unlinked > 0) {
+        setExportConfirm({ ...exportConfirm, reason: "unlinked", pending: unlinked });
+        return;
+      }
+    }
+    void doExport(exportConfirm.format, exportConfirm.mode, true);
   }
 
   function updateSectionTitle(index: number, value: string) {
@@ -380,15 +441,16 @@ export function ResumePage() {
 
   async function completeReview() {
     if (!draft) return;
-    const sections = draft.sections.map((section) => ({
-      ...section,
-      items: section.items.map((item) => ({
-        ...item,
-        decision: item.decision ?? ("adopt" as const),
-      })),
-    }));
+    // B3：完成审阅 ≠ 全部采纳。存在未决策条目时拒绝完成并定位到第一项，
+    // 不再把未决策项静默置为 adopt。
+    const completion = reviewCompletion(draft.sections);
+    if (completion.kind === "blocked") {
+      setCurrentIndex(completion.firstPendingIndex);
+      toast.info(`还有 ${completion.pending} 项待确认，已定位到第一项，请逐项决策后再完成审阅`);
+      return;
+    }
     try {
-      const payload = await api.updateResumeDraft(draft.id, sections);
+      const payload = await api.updateResumeDraft(draft.id, draft.sections);
       setDraft(payload);
       setReviewMode(false);
       setEditing(false);
@@ -741,18 +803,22 @@ export function ResumePage() {
           position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)",
           display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000,
         }}>
-          <div className="panel" style={{ maxWidth: 420, padding: "1.5rem" }}>
-            <h2 style={{ marginBottom: "0.5rem" }}>草稿尚未审阅完成</h2>
+          <div className="panel" style={{ maxWidth: 480, padding: "1.5rem" }}>
+            <h2 style={{ marginBottom: "0.5rem" }}>
+              {exportConfirm.reason === "pending" ? "草稿尚未审阅完成" : "存在未关联档案证据的内容"}
+            </h2>
             <p className="subtle" style={{ marginBottom: "1rem" }}>
-              还有 {exportConfirm.pending} 项待确认。未审阅的草稿可能包含不完整或待修改的内容，是否继续导出？
+              {exportConfirm.reason === "pending"
+                ? `还有 ${exportConfirm.pending} 项待确认。未审阅的草稿可能包含不完整或待修改的内容，是否继续导出？`
+                : `有 ${exportConfirm.pending} 项内容未关联档案证据（可能为手动添加），导出后无法追溯其来源。请确认这些内容真实无误后再继续。`}
             </p>
             <div className="button-row" style={{ justifyContent: "flex-end" }}>
               <button className="secondary-button" onClick={() => setExportConfirm(null)}>
-                返回审阅
+                {exportConfirm.reason === "pending" ? "返回审阅" : "返回检查"}
               </button>
               <button
                 className="primary-button"
-                onClick={() => void doExport(exportConfirm.format, exportConfirm.mode, true)}
+                onClick={confirmExportOverride}
                 disabled={exporting}
               >
                 {exporting && <ButtonSpinner />}

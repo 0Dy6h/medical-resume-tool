@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { flattenReviewItems, computeDraftStatus, reviewTone, filterExportSections, exportBlock, readPendingDraftId, PENDING_DRAFT_KEY, isUnlinkedReviewItem, shouldResetDraftOnJobChange } from "./ResumePage";
+import { flattenReviewItems, computeDraftStatus, reviewTone, filterExportSections, exportBlock, readPendingDraftId, PENDING_DRAFT_KEY, isUnlinkedReviewItem, shouldResetDraftOnJobChange, reviewCompletion, unlinkedExportCount } from "./ResumePage";
 import type { ResumeSection } from "../types";
 
 describe("shouldResetDraftOnJobChange — 切岗时草稿上下文必须跟随选择器", () => {
@@ -106,27 +106,69 @@ describe("computed draft status", () => {
   });
 });
 
-describe("完成审阅 — all items become non-pending", () => {
-  it("completing review sets undecided items to adopt", () => {
-    const withSomeDecisions = sampleSections.map((s, si) => ({
-      ...s,
-      items: s.items.map((i, ii) =>
-        si === 1 && ii === 0 ? { ...i, decision: "edit" as const } : i,
-      ),
-    }));
-    // Simulate "完成审阅": items without decision get "adopt"
-    const completed = withSomeDecisions.map((s) => ({
-      ...s,
-      items: s.items.map((i) => ({ ...i, decision: i.decision ?? ("adopt" as const) })),
-    }));
-    expect(computeDraftStatus(completed)).toBe("reviewed");
-    for (const section of completed) {
-      for (const item of section.items) {
-        expect(item.decision).toBeDefined();
-      }
+describe("完成审阅 — 不再自动全采纳（B3）", () => {
+  const withSomeDecisions: ResumeSection[] = sampleSections.map((s, si) => ({
+    ...s,
+    items: s.items.map((i, ii) =>
+      si === 1 && ii === 0 ? { ...i, decision: "edit" as const } : i,
+    ),
+  }));
+
+  it("存在未决策条目 → blocked，给出数量并定位第一项索引", () => {
+    const result = reviewCompletion(withSomeDecisions);
+    expect(result.kind).toBe("blocked");
+    if (result.kind === "blocked") {
+      expect(result.pending).toBe(4);
+      expect(result.firstPendingIndex).toBe(0);
     }
-    // The edit decision is preserved
-    expect(completed[1].items[0].decision).toBe("edit");
+  });
+
+  it("blocked 时草稿保持 draft 状态 —— 未决策项不会被静默置为 adopt", () => {
+    // 模拟新版 completeReview：sections 原样保存，不补 decision。
+    const afterAttemptedComplete = withSomeDecisions;
+    expect(computeDraftStatus(afterAttemptedComplete)).toBe("draft");
+    expect(afterAttemptedComplete[0].items[0].decision).toBeUndefined();
+  });
+
+  it("全部条目已有决策 → complete", () => {
+    const decided = sampleSections.map((s) => ({
+      ...s,
+      items: s.items.map((i) => ({ ...i, decision: "adopt" as const })),
+    }));
+    expect(reviewCompletion(decided)).toEqual({ kind: "complete" });
+  });
+});
+
+describe("unlinkedExportCount — 投递版无证据条目统计（B3）", () => {
+  it("全部正文条目绑定档案证据 → 0（身份/缺口区块天然不计入）", () => {
+    expect(unlinkedExportCount(sampleSections)).toBe(0);
+  });
+
+  it("正文区块存在无 profile_field_id 条目 → 计入", () => {
+    const withUnlinked: ResumeSection[] = sampleSections.map((s, si) => ({
+      ...s,
+      items: si === 1
+        ? [{ text: "手动添加的成果", profile_field_id: "edu-1" }, { text: "自定义经历" }, { text: "另一条自定义" }]
+        : s.items,
+    }));
+    expect(unlinkedExportCount(withUnlinked)).toBe(2);
+  });
+
+  it("decision=remove 的无证据条目不计入（不会随导出）", () => {
+    const withRemoved: ResumeSection[] = sampleSections.map((s, si) => ({
+      ...s,
+      items: si === 1
+        ? [{ text: "自定义经历", decision: "remove" as const }, { text: "保留的自定义" }]
+        : s.items,
+    }));
+    expect(unlinkedExportCount(withRemoved)).toBe(1);
+  });
+
+  it("gaps 区块条目不计入", () => {
+    const withGapOnly: ResumeSection[] = [
+      { id: "gaps", title: "投递前需补充确认", items: [{ text: "未找到SCI论文证据" }] },
+    ];
+    expect(unlinkedExportCount(withGapOnly)).toBe(0);
   });
 });
 
