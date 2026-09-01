@@ -15,10 +15,25 @@ pnpm build
 
 ## Start Services
 
-Backend:
+一键启动/停止（推荐）：
 
 ```powershell
-uv run --project backend uvicorn app.main:app --host 127.0.0.1 --port 8000
+pwsh -NoProfile -File scripts/start-local.ps1       # 启动：装依赖(非交互) + 起前后端 + 健康自检 + 开浏览器
+pwsh -NoProfile -File scripts/start-local.ps1 -Stop # 停止（按 PID 文件 + 进程树，不误杀其他程序）
+```
+
+脚本把服务放在后台进程并写日志到 `logs/`（`backend.log` / `frontend.log`、PID 文件
+`backend.pid` / `frontend.pid`）；关闭终端不会停止服务，需用 `-Stop` 停止。
+若 8000/5173 端口被占用会明确报错并列出占用进程。脚本会对 pnpm 设 `CI=true`
+并禁用交互确认，避免 node_modules 布局与 pnpm 版本不一致时永久卡在 “Proceed? (Y/n)”。
+
+手动启动：
+
+Backend (工作目录必须在 `backend/`，用 `python -m` 保证包可导入):
+
+```powershell
+cd backend
+uv run --project . python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
 Frontend:

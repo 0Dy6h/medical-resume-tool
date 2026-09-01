@@ -18,8 +18,14 @@ Backend:
 
 ```powershell
 uv run --project backend pytest -q
-cd backend; uv run --project . uvicorn app.main:app --host 127.0.0.1 --port 8000
+cd backend; uv run --project . python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
+
+> 注意：uvicorn 必须以 `python -m uvicorn` 且工作目录在 `backend/` 下启动
+> （`app` 包位于 `backend/`）。直接从仓库根目录跑 `uv run --project backend uvicorn …`
+> 会报 `ModuleNotFoundError: No module named 'app'`。
+> 一键启动/停止（含日志与健康自检）：`pwsh -NoProfile -File scripts/start-local.ps1`
+> （`-Stop` 停止，`-NoBrowser` 不自动开浏览器）。
 
 > **SQLite path note:** the database path is relative to the current working directory. From the repo root it uses `data/app.db`; from `backend/` it uses `backend/data/app.db`. The two paths do not share data.
 

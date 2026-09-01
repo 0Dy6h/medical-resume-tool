@@ -53,6 +53,15 @@ pnpm dev
 http://127.0.0.1:5173
 ```
 
+## 本地一键启动（推荐）
+
+```powershell
+pwsh -NoProfile -File scripts/start-local.ps1        # 启动：装依赖(非交互) + 起前后端 + 健康自检 + 开浏览器
+pwsh -NoProfile -File scripts/start-local.ps1 -Stop  # 停止服务（按 PID 文件 + 进程树）
+```
+
+日志写入 `logs/`，数据库为 `backend/data/app.db`。详见 `docs/runbook.md`。
+
 ## MVP 使用顺序
 
 1. 启动后端和前端。
