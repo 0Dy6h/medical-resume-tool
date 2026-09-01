@@ -363,10 +363,20 @@ class JobListOut(BaseModel):
     offset: int = 0
 
 
+class JobSnapshotOut(BaseModel):
+    """岗位历史版本快照（A4 溯源：公告改版后的旧正文）。"""
+    source_text_hash: str
+    raw_text: str
+    parser_name: str
+    fetched_at: str
+    captured_at: str
+
+
 class JobDetailOut(JobOut):
     raw_snapshot: RawSnapshot
     extraction_evidence: dict[str, Any]
     match_analysis: list[dict[str, Any]] | None = None
+    history: list[JobSnapshotOut] = []
 
 
 class AnalyticsSummary(BaseModel):

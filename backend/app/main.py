@@ -74,6 +74,7 @@ from app.services.repositories import (
     has_matching_jobs_last_30d,
     list_crawl_runs,
     list_institutions,
+    list_job_snapshots,
     list_jobs,
     list_subscriptions,
     mark_subscription_read,
@@ -291,6 +292,7 @@ def create_app(database_url: str | None = None) -> FastAPI:
                 "fetched_at": job["fetched_at"],
                 "raw_text": job["raw_text"],
             },
+            "history": list_job_snapshots(engine, job_id),
             "match_analysis": match_analysis,
         }
 

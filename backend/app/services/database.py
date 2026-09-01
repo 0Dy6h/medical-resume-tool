@@ -110,19 +110,33 @@ def init_db(engine: DatabaseEngine) -> None:
                 requirements TEXT,
                 posted_at TEXT,
                 deadline TEXT,
-                source_url TEXT NOT NULL UNIQUE,
+                source_url TEXT NOT NULL,
                 source_text_hash TEXT NOT NULL,
                 raw_text TEXT NOT NULL,
                 tags TEXT NOT NULL,
                 extraction_evidence TEXT NOT NULL,
                 fetched_at TEXT NOT NULL,
                 parser_name TEXT NOT NULL,
-                confidence REAL NOT NULL
+                confidence REAL NOT NULL,
+                -- A4 溯源：岗位身份 = 机构 + 来源 URL，两家机构的同一公告互不吞并
+                UNIQUE(institution_id, source_url)
             );
 
             CREATE INDEX IF NOT EXISTS idx_jobs_category ON jobs(job_category);
             CREATE INDEX IF NOT EXISTS idx_jobs_region ON jobs(region);
             CREATE INDEX IF NOT EXISTS idx_jobs_institution ON jobs(institution_id);
+
+            CREATE TABLE IF NOT EXISTS job_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                job_id INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+                source_text_hash TEXT NOT NULL,
+                raw_text TEXT NOT NULL,
+                parser_name TEXT NOT NULL,
+                fetched_at TEXT NOT NULL,
+                captured_at TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_job_snapshots_job ON job_snapshots(job_id);
 
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -187,6 +201,7 @@ def init_db(engine: DatabaseEngine) -> None:
         )
         _migrate_subscriptions_add_last_pushed_at(conn)
         _migrate_crawl_runs_add_trigger(conn)
+        _migrate_jobs_identity_key(conn)
         _migrate_user_scoped_tables(conn)
         count = conn.execute("SELECT COUNT(*) AS count FROM institutions").fetchone()["count"]
         if count == 0:
@@ -216,6 +231,90 @@ def _migrate_crawl_runs_add_trigger(conn: sqlite3.Connection) -> None:
     cols = {row["name"] for row in conn.execute("PRAGMA table_info(crawl_runs)").fetchall()}
     if cols and "trigger" not in cols:
         conn.execute("ALTER TABLE crawl_runs ADD COLUMN trigger TEXT NOT NULL DEFAULT 'manual'")
+
+
+def _jobs_has_url_only_unique(conn: sqlite3.Connection) -> bool:
+    """旧身份约束检测：存在仅覆盖 source_url 的唯一索引即为旧库。"""
+    for row in conn.execute("PRAGMA index_list(jobs)").fetchall():
+        if not row["unique"]:
+            continue
+        cols = [
+            info["name"]
+            for info in conn.execute(f'PRAGMA index_info("{row["name"]}")').fetchall()
+        ]
+        if cols == ["source_url"]:
+            return True
+    return False
+
+
+def _migrate_jobs_identity_key(conn: sqlite3.Connection) -> None:
+    """A4 溯源：jobs 唯一约束从全局 source_url 重建为 (institution_id, source_url)。
+
+    旧约束会让两家机构共用同一公告 URL 时互相覆盖（错挂）；新身份键让镜像
+    公告各自成行。按 SQLite 官方表重建流程执行，行 id 原样保留，引用 jobs
+    的外键文本不受影响。
+    """
+    if not _jobs_has_url_only_unique(conn):
+        return
+    conn.commit()
+    conn.execute("PRAGMA foreign_keys=OFF")
+    try:
+        conn.executescript(
+            """
+            CREATE TABLE jobs_new (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                institution_id INTEGER NOT NULL REFERENCES institutions(id),
+                institution_name TEXT NOT NULL,
+                institution_type TEXT NOT NULL,
+                region TEXT NOT NULL,
+                title TEXT NOT NULL,
+                department TEXT,
+                location TEXT,
+                education TEXT,
+                profession TEXT,
+                job_category TEXT NOT NULL,
+                responsibilities TEXT,
+                requirements TEXT,
+                posted_at TEXT,
+                deadline TEXT,
+                source_url TEXT NOT NULL,
+                source_text_hash TEXT NOT NULL,
+                raw_text TEXT NOT NULL,
+                tags TEXT NOT NULL,
+                extraction_evidence TEXT NOT NULL,
+                fetched_at TEXT NOT NULL,
+                parser_name TEXT NOT NULL,
+                confidence REAL NOT NULL,
+                UNIQUE(institution_id, source_url)
+            );
+
+            INSERT INTO jobs_new (
+                id, institution_id, institution_name, institution_type, region,
+                title, department, location, education, profession, job_category,
+                responsibilities, requirements, posted_at, deadline, source_url,
+                source_text_hash, raw_text, tags, extraction_evidence, fetched_at,
+                parser_name, confidence
+            )
+            SELECT
+                id, institution_id, institution_name, institution_type, region,
+                title, department, location, education, profession, job_category,
+                responsibilities, requirements, posted_at, deadline, source_url,
+                source_text_hash, raw_text, tags, extraction_evidence, fetched_at,
+                parser_name, confidence
+            FROM jobs;
+
+            DROP TABLE jobs;
+            ALTER TABLE jobs_new RENAME TO jobs;
+
+            CREATE INDEX IF NOT EXISTS idx_jobs_category ON jobs(job_category);
+            CREATE INDEX IF NOT EXISTS idx_jobs_region ON jobs(region);
+            CREATE INDEX IF NOT EXISTS idx_jobs_institution ON jobs(institution_id);
+            """
+        )
+        conn.commit()
+    finally:
+        conn.execute("PRAGMA foreign_keys=ON")
+        conn.commit()
 
 
 def _table_columns(conn: sqlite3.Connection, table: str) -> set[str]:

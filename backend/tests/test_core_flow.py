@@ -360,7 +360,9 @@ def test_execute_crawl_run_updates_progress_incrementally(tmp_path, monkeypatch)
     assert persisted["success_count"] == final["success_count"]
 
 
-def test_crawl_deduplicates_by_source_text_hash_and_refreshes_fetched_at(tmp_path, monkeypatch):
+def test_crawl_dedupes_by_identity_and_refreshes_fetched_at(tmp_path, monkeypatch):
+    """U6 身份语义：同一身份（机构+URL）重复抓取去重并刷新 fetched_at；
+    相同正文不同 URL 各自成行，不再按正文哈希吞并。"""
     monkeypatch.setenv("CRAWL_DELAY_SECONDS", "0")
     client = make_client(tmp_path)
     calls = 0
@@ -403,10 +405,30 @@ def test_crawl_deduplicates_by_source_text_hash_and_refreshes_fetched_at(tmp_pat
     crawl_and_wait(client, [1])
 
     jobs = client.get("/api/jobs").json()
-    assert jobs["total"] == 1
-    assert jobs["items"][0]["source_url"] == "https://example.test/jobs/1"
-    assert jobs["items"][0]["source_text_hash"] == "same-source-text-hash"
-    assert jobs["items"][0]["fetched_at"] == "2026-06-09T00:00:02+00:00"
+    # 两轮抓取各带来一个不同 URL 的公告 → 两条记录（身份键为机构+URL）
+    assert jobs["total"] == 2
+    assert {item["source_url"] for item in jobs["items"]} == {
+        "https://example.test/jobs/1",
+        "https://example.test/jobs/2",
+    }
+
+    # 第三轮重复抓取相同 URL（calls 不再增长）→ 不新增，仅刷新 fetched_at
+    async def crawl_same_identity(institution):  # noqa: ANN001
+        return [
+            make_job(
+                source_url="https://example.test/jobs/1",
+                fetched_at="2026-06-09T00:00:03+00:00",
+            )
+        ]
+
+    monkeypatch.setattr(crawler_module, "crawl_institution", crawl_same_identity)
+    crawl_and_wait(client, [1])
+
+    jobs = client.get("/api/jobs").json()
+    assert jobs["total"] == 2
+    refreshed = [item for item in jobs["items"] if item["source_url"] == "https://example.test/jobs/1"][0]
+    assert refreshed["fetched_at"] == "2026-06-09T00:00:03+00:00"
+    assert refreshed["source_text_hash"] == "same-source-text-hash"
 
 
 def test_crawl_defaults_to_one_second_delay_between_institutions(tmp_path, monkeypatch):

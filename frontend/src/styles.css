@@ -1071,6 +1071,25 @@ pre {
   line-height: 1.55;
 }
 
+.snapshot-item {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin-bottom: 8px;
+  background: #fbfcfb;
+}
+
+.snapshot-item summary {
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--muted);
+  user-select: none;
+}
+
+.snapshot-item[open] summary {
+  margin-bottom: 8px;
+}
+
 .analysis-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

@@ -154,6 +154,11 @@ def _crawl_run_row_to_dict(row: Any) -> dict[str, Any]:
 
 
 def upsert_job(engine: DatabaseEngine, institution: dict[str, Any], parsed: Any) -> bool:
+    """按身份键 (institution_id, source_url) 落库（A4 溯源语义）。
+
+    返回 True 表示新增岗位；内容改版时旧正文先归档到 job_snapshots 再更新，
+    历史正文始终可查；不同机构/不同 URL 的相同文本公告互不吞并。
+    """
     payload = {
         "institution_id": institution["id"],
         "institution_name": institution["name"],
@@ -179,52 +184,86 @@ def upsert_job(engine: DatabaseEngine, institution: dict[str, Any], parsed: Any)
         "confidence": parsed.confidence,
     }
     with connect(engine) as conn:
-        duplicate_by_hash = conn.execute(
-            "SELECT id FROM jobs WHERE source_text_hash = ?",
-            (parsed.source_text_hash,),
+        existing = conn.execute(
+            "SELECT id, source_text_hash FROM jobs WHERE institution_id = ? AND source_url = ?",
+            (institution["id"], parsed.source_url),
         ).fetchone()
-        if duplicate_by_hash:
-            conn.execute(
-                "UPDATE jobs SET fetched_at = ? WHERE id = ?",
-                (parsed.fetched_at, duplicate_by_hash["id"]),
-            )
-            conn.commit()
-            return False
-        exists = conn.execute("SELECT id FROM jobs WHERE source_url = ?", (parsed.source_url,)).fetchone()
-        if exists:
+        if existing is None:
             conn.execute(
                 """
-                UPDATE jobs SET
-                    title=:title, department=:department, location=:location, education=:education,
-                    profession=:profession, job_category=:job_category, responsibilities=:responsibilities,
-                    requirements=:requirements, posted_at=:posted_at, deadline=:deadline,
-                    source_text_hash=:source_text_hash, raw_text=:raw_text, tags=:tags,
-                    extraction_evidence=:extraction_evidence, fetched_at=:fetched_at,
-                    parser_name=:parser_name, confidence=:confidence
-                WHERE source_url=:source_url
+                INSERT INTO jobs (
+                    institution_id, institution_name, institution_type, region, title, department,
+                    location, education, profession, job_category, responsibilities, requirements,
+                    posted_at, deadline, source_url, source_text_hash, raw_text, tags,
+                    extraction_evidence, fetched_at, parser_name, confidence
+                ) VALUES (
+                    :institution_id, :institution_name, :institution_type, :region, :title, :department,
+                    :location, :education, :profession, :job_category, :responsibilities, :requirements,
+                    :posted_at, :deadline, :source_url, :source_text_hash, :raw_text, :tags,
+                    :extraction_evidence, :fetched_at, :parser_name, :confidence
+                )
                 """,
                 payload,
             )
             conn.commit()
+            return True
+
+        if existing["source_text_hash"] == parsed.source_text_hash:
+            # 同一身份、内容未变：仅刷新抓取时间，保留首次入库语义
+            conn.execute(
+                "UPDATE jobs SET fetched_at = ? WHERE id = ?",
+                (parsed.fetched_at, existing["id"]),
+            )
+            conn.commit()
             return False
+
+        # 内容改版：归档旧版本，再更新为最新内容（公告改版后历史正文可查）
+        previous = conn.execute(
+            "SELECT source_text_hash, raw_text, parser_name, fetched_at FROM jobs WHERE id = ?",
+            (existing["id"],),
+        ).fetchone()
         conn.execute(
             """
-            INSERT INTO jobs (
-                institution_id, institution_name, institution_type, region, title, department,
-                location, education, profession, job_category, responsibilities, requirements,
-                posted_at, deadline, source_url, source_text_hash, raw_text, tags,
-                extraction_evidence, fetched_at, parser_name, confidence
-            ) VALUES (
-                :institution_id, :institution_name, :institution_type, :region, :title, :department,
-                :location, :education, :profession, :job_category, :responsibilities, :requirements,
-                :posted_at, :deadline, :source_url, :source_text_hash, :raw_text, :tags,
-                :extraction_evidence, :fetched_at, :parser_name, :confidence
-            )
+            INSERT INTO job_snapshots (job_id, source_text_hash, raw_text, parser_name, fetched_at, captured_at)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
-            payload,
+            (
+                existing["id"],
+                previous["source_text_hash"],
+                previous["raw_text"],
+                previous["parser_name"],
+                previous["fetched_at"],
+                now_iso(),
+            ),
+        )
+        conn.execute(
+            """
+            UPDATE jobs SET
+                title=:title, department=:department, location=:location, education=:education,
+                profession=:profession, job_category=:job_category, responsibilities=:responsibilities,
+                requirements=:requirements, posted_at=:posted_at, deadline=:deadline,
+                source_text_hash=:source_text_hash, raw_text=:raw_text, tags=:tags,
+                extraction_evidence=:extraction_evidence, fetched_at=:fetched_at,
+                parser_name=:parser_name, confidence=:confidence
+            WHERE id=:job_id
+            """,
+            {**payload, "job_id": existing["id"]},
         )
         conn.commit()
-        return True
+        return False
+
+
+def list_job_snapshots(engine: DatabaseEngine, job_id: int, limit: int = 20) -> list[dict[str, Any]]:
+    """岗位历史版本（最新改版在前），用于详情页溯源。"""
+    with connect(engine) as conn:
+        rows = conn.execute(
+            """
+            SELECT source_text_hash, raw_text, parser_name, fetched_at, captured_at
+            FROM job_snapshots WHERE job_id = ? ORDER BY id DESC LIMIT ?
+            """,
+            (job_id, limit),
+        ).fetchall()
+    return [dict(row) for row in rows]
 
 
 def mark_institution(engine: DatabaseEngine, institution_id: int, status: str, error: str | None = None) -> None:

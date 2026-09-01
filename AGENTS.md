@@ -8,6 +8,7 @@ This repo is a local MVP for Chinese medical job intelligence and truthful resum
 
 - Do not generate resume facts that are absent from the structured profile.
 - Keep every job record traceable to `source_url`, `source_text_hash`, `fetched_at`, and `parser_name`.
+- Job identity is `(institution_id, source_url)` — never dedupe jobs by `source_text_hash` (identical-text announcements from different institutions must coexist), and archive the previous body to `job_snapshots` whenever a re-crawl sees changed content at the same identity (A4 溯源).
 - MVP data collection is public official recruitment pages only. Do not add login-based platform scraping or anti-bot bypasses.
 - The first six institutions use deterministic fixture data for demo stability. Six official-site adapters are enabled (`nfyy`, `z2hospital`, `bjmu`, `chinacdc`, `hrbmu`, `njmu`); disabled seeds have structured blocked reasons in `seeds.BLOCKED_REASONS`, exposed via the `/api/institutions` endpoint.
 - PDF attachments are currently discovered and recorded as evidence only; do not add PDF table parsing unless the slice includes fixtures and tests.

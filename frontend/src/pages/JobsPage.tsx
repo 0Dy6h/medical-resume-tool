@@ -623,6 +623,20 @@ export function JobsPage({ onNavigate }: { onNavigate: (page: string) => void })
             </div>
             <h3>原文快照</h3>
             <pre>{detail.raw_snapshot.raw_text}</pre>
+            {(detail.history?.length ?? 0) > 0 && (
+              <>
+                <h3>历史版本（{detail.history!.length}）</h3>
+                <p className="subtle">公告内容改版前的原文快照，按归档时间倒序，可点开查看全文</p>
+                {detail.history!.map((snapshot, index) => (
+                  <details className="snapshot-item" key={`${snapshot.source_text_hash}-${index}`}>
+                    <summary>
+                      归档于 {formatDate(snapshot.captured_at)} · 原抓取 {formatDate(snapshot.fetched_at)} · {snapshot.parser_name} · 哈希 {snapshot.source_text_hash.slice(0, 8)}
+                    </summary>
+                    <pre>{snapshot.raw_text}</pre>
+                  </details>
+                ))}
+              </>
+            )}
       </>
     );
   }

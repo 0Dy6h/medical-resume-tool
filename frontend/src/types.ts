@@ -78,6 +78,14 @@ export type MatchFinding = {
   advice?: string | null;
 };
 
+export type JobSnapshot = {
+  source_text_hash: string;
+  raw_text: string;
+  parser_name: string;
+  fetched_at: string;
+  captured_at: string;
+};
+
 export type JobDetail = Job & {
   raw_snapshot: {
     source_url: string;
@@ -96,6 +104,7 @@ export type JobDetail = Job & {
     parser_warning?: string;
   };
   match_analysis?: MatchFinding[] | null;
+  history?: JobSnapshot[];
 };
 
 export type JobList = {
