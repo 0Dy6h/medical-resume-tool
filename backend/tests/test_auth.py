@@ -108,7 +108,7 @@ def test_resume_draft_not_visible_across_users(tmp_path):
     headers_a = {"Authorization": f"Bearer {token_a}"}
     headers_b = {"Authorization": f"Bearer {token_b}"}
 
-    run = client.post("/api/crawl-runs", json={"institution_ids": [1]})
+    run = client.post("/api/crawl-runs", json={"institution_ids": [1]}, headers=headers_a)
     run_id = run.json()["id"]
     import time
 

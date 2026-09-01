@@ -64,14 +64,14 @@ def get_institutions_by_ids(engine: DatabaseEngine, ids: list[int] | None) -> li
     return items
 
 
-def create_crawl_run(engine: DatabaseEngine, institution_ids: list[int]) -> int:
+def create_crawl_run(engine: DatabaseEngine, institution_ids: list[int], trigger: str = "manual") -> int:
     with connect(engine) as conn:
         cur = conn.execute(
             """
-            INSERT INTO crawl_runs (status, started_at, institution_ids, error_summary)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO crawl_runs (status, started_at, institution_ids, error_summary, trigger)
+            VALUES (?, ?, ?, ?, ?)
             """,
-            ("running", now_iso(), to_json(institution_ids), "[]"),
+            ("running", now_iso(), to_json(institution_ids), "[]", trigger),
         )
         conn.commit()
         return int(cur.lastrowid)
@@ -132,6 +132,19 @@ def get_crawl_run(engine: DatabaseEngine, run_id: int) -> dict[str, Any]:
         row = conn.execute("SELECT * FROM crawl_runs WHERE id = ?", (run_id,)).fetchone()
     if row is None:
         raise KeyError(run_id)
+    return _crawl_run_row_to_dict(row)
+
+
+def list_crawl_runs(engine: DatabaseEngine, limit: int = 10) -> list[dict[str, Any]]:
+    """按最新优先返回抓取任务（含手动与自动触发）。"""
+    with connect(engine) as conn:
+        rows = conn.execute(
+            "SELECT * FROM crawl_runs ORDER BY id DESC LIMIT ?", (limit,)
+        ).fetchall()
+    return [_crawl_run_row_to_dict(row) for row in rows]
+
+
+def _crawl_run_row_to_dict(row: Any) -> dict[str, Any]:
     item = dict(row)
     item["institution_ids"] = from_json(item["institution_ids"], [])
     errors = from_json(item["error_summary"], [])

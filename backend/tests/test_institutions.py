@@ -65,11 +65,27 @@ def test_blocked_reasons_covers_all_disabled_seeds():
     )
 
 
+_crawl_seq = {"n": 0}
+
+
+def _crawl_headers(client) -> dict[str, str]:
+    """注册一次性用户并返回 Authorization 头（抓取端点需要登录）。"""
+    _crawl_seq["n"] += 1
+    response = client.post(
+        "/api/auth/register",
+        json={"username": f"crawler-{_crawl_seq['n']}", "password": "secret123"},
+    )
+    assert response.status_code == 201, response.text
+    return {"Authorization": f"Bearer {response.json()['token']}"}
+
+
 def test_crawl_all_disabled_returns_400(tmp_path):
     """Selecting only disabled institutions returns 400 with exact message."""
     client = make_client(tmp_path)
     # ids 8, 9, 10 are all disabled
-    response = client.post("/api/crawl-runs", json={"institution_ids": [8, 9, 10]})
+    response = client.post(
+        "/api/crawl-runs", json={"institution_ids": [8, 9, 10]}, headers=_crawl_headers(client)
+    )
     assert response.status_code == 400
     assert response.json()["detail"] == "所选机构均尚未适配，无法抓取"
 
@@ -78,7 +94,9 @@ def test_crawl_mixed_only_crawls_enabled(tmp_path):
     """Mixing enabled and disabled institutions — only enabled ones are crawled."""
     client = make_client(tmp_path)
     # id=1 is enabled (fixture), id=8 is disabled
-    response = client.post("/api/crawl-runs", json={"institution_ids": [1, 8]})
+    response = client.post(
+        "/api/crawl-runs", json={"institution_ids": [1, 8]}, headers=_crawl_headers(client)
+    )
     assert response.status_code == 201
     run_data = response.json()
     # The crawl run should only contain enabled institution ids

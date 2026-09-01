@@ -76,6 +76,16 @@ Public sites can change or rate-limit, so fixture tests remain the stable contra
 - If launched from `backend/`, the relative default becomes `backend/data/app.db`.
 - Override with `DATABASE_URL=sqlite:///absolute/or/relative/path.db` when a single fixed database location is needed.
 
+## Daily Auto Crawl (U5)
+
+- 调度器每天在 `SUBSCRIPTION_SCAN_HOUR:SUBSCRIPTION_SCAN_MINUTE`（默认 09:00）执行一次维护循环：
+  先对全部已启用机构自动抓取（跑批记录 `trigger=auto`），随后扫描订阅推送。
+- 用 `AUTO_CRAWL_ENABLED=false` 可单独关闭自动抓取（订阅扫描仍按原配置执行）。
+- 抓取单飞：手动启动抓取时若已有任务在跑，接口返回 409「已有抓取任务在进行中」；
+  自动抓取遇到占用会跳过本轮（日志留痕），订阅扫描不受影响。
+- 自动抓取结果在「抓取任务」页的「最近任务」表中可见；机构级上次抓取时间与失败原因
+  见同一页面的机构种子表（`last_crawled_at` / `last_status` / `last_error`）。
+
 ## Known Operational Notes
 
 - The Windows `python` command on this machine points to the Microsoft Store stub. Use `uv run --project backend ...` rather than `python ...`.

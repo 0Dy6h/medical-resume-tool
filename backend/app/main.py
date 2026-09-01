@@ -41,7 +41,7 @@ from app.schemas import (
 )
 from app.services.analytics import analytics_summary, generate_report
 from app.services.auth import hash_password, make_token, verify_password, verify_token
-from app.services.crawler import execute_crawl_run
+from app.services.crawler import execute_crawl_run, release_crawl_slot, try_acquire_crawl_slot
 from app.services.database import DatabaseEngine, create_engine, init_db
 from app.services.exporter import (
     build_export_filename,
@@ -72,6 +72,7 @@ from app.services.repositories import (
     get_user_by_id,
     get_user_by_username,
     has_matching_jobs_last_30d,
+    list_crawl_runs,
     list_institutions,
     list_jobs,
     list_subscriptions,
@@ -93,7 +94,7 @@ from app.services.resume import (
     is_total_mismatch,
     match_profile_to_job,
 )
-from app.services.scheduler import SubscriptionScheduler
+from app.services.scheduler import DailyScheduler
 
 logger = logging.getLogger(__name__)
 
@@ -108,11 +109,13 @@ def create_app(database_url: str | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        scheduler = SubscriptionScheduler(
+        scheduler = DailyScheduler(
             engine,
             hour=config.subscription_scan_hour,
             minute=config.subscription_scan_minute,
             enabled=config.subscription_scan_enabled,
+            auto_crawl=config.auto_crawl_enabled,
+            crawl_delay=config.crawl_delay_seconds,
         )
         app.state.scheduler = scheduler
         scheduler.start()
@@ -167,7 +170,11 @@ def create_app(database_url: str | None = None) -> FastAPI:
         return items
 
     @app.post("/api/crawl-runs", response_model=CrawlRunOut, status_code=201)
-    def start_crawl(payload: CrawlRunCreate, engine: Annotated[DatabaseEngine, Depends(get_engine)]) -> dict:
+    def start_crawl(
+        payload: CrawlRunCreate,
+        engine: Annotated[DatabaseEngine, Depends(get_engine)],
+        user: Annotated[dict, Depends(get_current_user)],
+    ) -> dict:
         from app.config import config
         from app.services.seeds import BLOCKED_REASONS
         institutions_to_crawl = get_institutions_by_ids(engine, payload.institution_ids)
@@ -189,7 +196,11 @@ def create_app(database_url: str | None = None) -> FastAPI:
                     inst["id"], inst["name"], reason,
                 )
 
-        run_id = create_crawl_run(engine, [item["id"] for item in adapted_institutions])
+        # 单飞：手动与自动抓取互斥，避免并发跑批互相干扰或重复入库。
+        if not try_acquire_crawl_slot():
+            raise HTTPException(status_code=409, detail="已有抓取任务在进行中，请等待完成后再启动")
+
+        run_id = create_crawl_run(engine, [item["id"] for item in adapted_institutions], trigger="manual")
 
         def _crawl_then_scan() -> None:
             try:
@@ -197,11 +208,19 @@ def create_app(database_url: str | None = None) -> FastAPI:
                     engine, run_id, adapted_institutions, config.crawl_delay_seconds
                 )
             finally:
+                release_crawl_slot()
                 scan_subscriptions(engine, datetime.now(timezone.utc))
 
         thread = threading.Thread(target=_crawl_then_scan, daemon=True)
         thread.start()
         return get_crawl_run(engine, run_id)
+
+    @app.get("/api/crawl-runs", response_model=list[CrawlRunOut])
+    def crawl_runs(
+        engine: Annotated[DatabaseEngine, Depends(get_engine)],
+        limit: Annotated[int, Query(ge=1, le=100)] = 10,
+    ) -> list[dict]:
+        return list_crawl_runs(engine, limit)
 
     @app.get("/api/crawl-runs/{run_id}", response_model=CrawlRunOut)
     def crawl_run(run_id: int, engine: Annotated[DatabaseEngine, Depends(get_engine)]) -> dict:

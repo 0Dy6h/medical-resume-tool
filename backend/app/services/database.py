@@ -90,7 +90,8 @@ def init_db(engine: DatabaseEngine) -> None:
                 institution_ids TEXT NOT NULL,
                 success_count INTEGER NOT NULL DEFAULT 0,
                 failure_count INTEGER NOT NULL DEFAULT 0,
-                error_summary TEXT NOT NULL DEFAULT '[]'
+                error_summary TEXT NOT NULL DEFAULT '[]',
+                trigger TEXT NOT NULL DEFAULT 'manual'
             );
 
             CREATE TABLE IF NOT EXISTS jobs (
@@ -185,6 +186,7 @@ def init_db(engine: DatabaseEngine) -> None:
             """
         )
         _migrate_subscriptions_add_last_pushed_at(conn)
+        _migrate_crawl_runs_add_trigger(conn)
         _migrate_user_scoped_tables(conn)
         count = conn.execute("SELECT COUNT(*) AS count FROM institutions").fetchone()["count"]
         if count == 0:
@@ -207,6 +209,13 @@ def _migrate_subscriptions_add_last_pushed_at(conn: sqlite3.Connection) -> None:
     cols = {row["name"] for row in conn.execute("PRAGMA table_info(subscriptions)").fetchall()}
     if cols and "last_pushed_at" not in cols:
         conn.execute("ALTER TABLE subscriptions ADD COLUMN last_pushed_at TEXT")
+
+
+def _migrate_crawl_runs_add_trigger(conn: sqlite3.Connection) -> None:
+    """A3 自动抓取：既有库的 crawl_runs 补 trigger 列，历史记录视为手动触发。"""
+    cols = {row["name"] for row in conn.execute("PRAGMA table_info(crawl_runs)").fetchall()}
+    if cols and "trigger" not in cols:
+        conn.execute("ALTER TABLE crawl_runs ADD COLUMN trigger TEXT NOT NULL DEFAULT 'manual'")
 
 
 def _table_columns(conn: sqlite3.Connection, table: str) -> set[str]:

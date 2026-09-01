@@ -32,8 +32,23 @@ def make_client(tmp_path: Path) -> TestClient:
     return TestClient(app)
 
 
+_crawl_seq = {"n": 0}
+
+
+def _crawl_headers(client: TestClient) -> dict[str, str]:
+    """注册一次性用户并返回 Authorization 头（抓取端点需要登录）。"""
+    _crawl_seq["n"] += 1
+    response = client.post(
+        "/api/auth/register",
+        json={"username": f"crawler-{_crawl_seq['n']}", "password": "secret123"},
+    )
+    assert response.status_code == 201, response.text
+    return {"Authorization": f"Bearer {response.json()['token']}"}
+
 def crawl_and_wait(client: TestClient, institution_ids: list[int], timeout: float = 30.0) -> dict:
-    run = client.post("/api/crawl-runs", json={"institution_ids": institution_ids})
+    run = client.post(
+        "/api/crawl-runs", json={"institution_ids": institution_ids}, headers=_crawl_headers(client)
+    )
     assert run.status_code == 201, run.text
     deadline = time.time() + timeout
     while time.time() < deadline:

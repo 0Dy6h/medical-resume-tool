@@ -34,6 +34,7 @@ export function CrawlPage() {
   const [institutions, setInstitutions] = useState<Institution[]>([]);
   const [selected, setSelected] = useState<Set<number>>(new Set([1, 2, 3, 4, 5, 6]));
   const [run, setRun] = useState<CrawlRun | null>(null);
+  const [recentRuns, setRecentRuns] = useState<CrawlRun[]>([]);
   const [loading, setLoading] = useState(false);
   const pollRef = useRef<number | null>(null);
 
@@ -45,8 +46,20 @@ export function CrawlPage() {
     }
   }
 
+  async function refreshRuns() {
+    try {
+      const runs = await api.crawlRuns(10);
+      setRecentRuns(runs);
+      // 无进行中的查看目标时，展示最近一次任务（含夜间自动抓取的结果）
+      setRun((current) => current ?? runs[0] ?? null);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "加载抓取记录失败");
+    }
+  }
+
   useEffect(() => {
     void refresh();
+    void refreshRuns();
     return () => {
       if (pollRef.current) window.clearInterval(pollRef.current);
     };
@@ -66,6 +79,7 @@ export function CrawlPage() {
           if (pollRef.current) window.clearInterval(pollRef.current);
           pollRef.current = null;
           await refresh();
+          await refreshRuns();
           if (payload.status === "completed") {
             toast.success(`抓取完成：成功 ${payload.success_count} 条`);
           } else if (payload.status === "partial") {
@@ -147,6 +161,7 @@ export function CrawlPage() {
           <div className="run-summary">
             <StatusPill value={run.status} />
             <span>任务 #{run.id}</span>
+            {run.trigger === "auto" && <span className="tag">自动</span>}
             <span>成功 {run.success_count}</span>
             <span>失败 {run.failure_count}</span>
             {crawling ? (
@@ -167,6 +182,41 @@ export function CrawlPage() {
               ))}
             </div>
           )}
+        </section>
+      )}
+
+      {recentRuns.length > 0 && (
+        <section className="panel table-panel">
+          <div className="panel-head">
+            <div>
+              <h2>最近任务</h2>
+              <p className="subtle">包含每日定时自动抓取（标为「自动」），失败原因可在任务详情与机构状态中查看</p>
+            </div>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>任务</th>
+                <th>触发</th>
+                <th>状态</th>
+                <th>成功</th>
+                <th>失败</th>
+                <th>完成时间</th>
+              </tr>
+            </thead>
+            <tbody>
+              {recentRuns.map((item) => (
+                <tr key={item.id}>
+                  <td>#{item.id}</td>
+                  <td>{item.trigger === "auto" ? <span className="tag">自动</span> : "手动"}</td>
+                  <td><StatusPill value={item.status} /></td>
+                  <td>{item.success_count}</td>
+                  <td>{item.failure_count}</td>
+                  <td>{formatDate(item.completed_at)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </section>
       )}
 

@@ -40,7 +40,11 @@ def wait_for_run(client: TestClient, run_id: int, timeout: float = 30.0) -> dict
 
 
 def crawl_and_wait(client: TestClient, institution_ids: list[int]) -> dict:
-    run = client.post("/api/crawl-runs", json={"institution_ids": institution_ids})
+    user = client.post("/api/auth/register", json={"username": "crawler", "password": "secret123"})
+    headers = {"Authorization": f"Bearer {user.json()['token']}"}
+    run = client.post(
+        "/api/crawl-runs", json={"institution_ids": institution_ids}, headers=headers
+    )
     assert run.status_code == 201, run.text
     return wait_for_run(client, run.json()["id"])
 

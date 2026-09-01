@@ -1030,7 +1030,9 @@ def test_crawl_triggers_subscription_scan(tmp_path):
     sub_id = created.json()["id"]
     _backdate_subscription(engine, sub_id, days=2)
 
-    crawl_resp = client.post("/api/crawl-runs", json={"institution_ids": [1]})
+    crawl_resp = client.post(
+        "/api/crawl-runs", json={"institution_ids": [1]}, headers=headers
+    )
     assert crawl_resp.status_code == 201
     run_id = crawl_resp.json()["id"]
 
@@ -1054,7 +1056,7 @@ def test_scheduler_injectable_clock(tmp_path):
     """Scheduler scan_once uses the injected clock for timestamps."""
     from datetime import datetime, timezone
     from app.services.database import create_engine, init_db, reset_db
-    from app.services.scheduler import SubscriptionScheduler
+    from app.services.scheduler import DailyScheduler
 
     fixed_time = datetime(2026, 1, 15, 10, 30, 0, tzinfo=timezone.utc)
     db_path = tmp_path / "sched-test.db"
@@ -1093,7 +1095,7 @@ def test_scheduler_injectable_clock(tmp_path):
         )
         conn.commit()
 
-    scheduler = SubscriptionScheduler(
+    scheduler = DailyScheduler(
         engine,
         hour=9,
         minute=0,

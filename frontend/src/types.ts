@@ -23,6 +23,7 @@ export type CrawlRun = {
   failure_count: number;
   error_summary: Array<Record<string, unknown>>;
   errors?: Array<Record<string, unknown>>;
+  trigger?: "manual" | "auto";
 };
 
 export type JobMatch = {

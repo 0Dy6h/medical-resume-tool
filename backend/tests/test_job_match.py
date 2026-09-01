@@ -26,8 +26,23 @@ def wait_for_run(client: TestClient, run_id: int, timeout: float = 30.0) -> dict
     raise AssertionError(f"crawl run {run_id} did not finish within {timeout}s")
 
 
+_crawl_seq = {"n": 0}
+
+
+def _crawl_headers(client: TestClient) -> dict[str, str]:
+    """注册一次性用户并返回 Authorization 头（抓取端点需要登录）。"""
+    _crawl_seq["n"] += 1
+    response = client.post(
+        "/api/auth/register",
+        json={"username": f"crawler-{_crawl_seq['n']}", "password": "secret123"},
+    )
+    assert response.status_code == 201, response.text
+    return {"Authorization": f"Bearer {response.json()['token']}"}
+
 def crawl_and_wait(client: TestClient, institution_ids: list[int], timeout: float = 30.0) -> dict:
-    run = client.post("/api/crawl-runs", json={"institution_ids": institution_ids})
+    run = client.post(
+        "/api/crawl-runs", json={"institution_ids": institution_ids}, headers=_crawl_headers(client)
+    )
     assert run.status_code == 201
     return wait_for_run(client, run.json()["id"], timeout)
 

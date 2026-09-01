@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import os
 import re
+import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from html import escape
@@ -275,6 +276,20 @@ async def crawl_generic(institution: dict[str, Any]) -> list[ParsedJob]:
             )
         )
     return parsed
+
+
+# ── 单飞闸（A3）：手动与自动抓取共用，同一时间最多一个抓取执行 ──────────
+_crawl_slot = threading.Lock()
+
+
+def try_acquire_crawl_slot() -> bool:
+    """尝试占用抓取执行槽；已被占用（另一个抓取在跑）时返回 False。"""
+    return _crawl_slot.acquire(blocking=False)
+
+
+def release_crawl_slot() -> None:
+    """释放抓取执行槽（必须由持有者在 finally 中调用）。"""
+    _crawl_slot.release()
 
 
 def execute_crawl_run(

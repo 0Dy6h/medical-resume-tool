@@ -319,6 +319,7 @@ class CrawlRunOut(BaseModel):
     failure_count: int
     error_summary: list[dict[str, Any]]
     errors: list[dict[str, Any]]
+    trigger: str = "manual"
 
 
 class RawSnapshot(BaseModel):

@@ -131,6 +131,7 @@ export const api = {
     if (!response.ok) throw new Error(await errorMessage(response, "清除状态失败"));
   },
   crawlRun: (id: number) => request<CrawlRun>(`/api/crawl-runs/${id}`),
+  crawlRuns: (limit = 10) => request<CrawlRun[]>(`/api/crawl-runs?limit=${limit}`),
   analytics: (trust?: string) =>
     request<AnalyticsSummary>(`/api/analytics/summary${trust && trust !== "all" ? `?trust=${trust}` : ""}`),
   profile: () => request<Profile>("/api/profile"),

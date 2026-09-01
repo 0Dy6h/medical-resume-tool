@@ -27,5 +27,8 @@ class Config:
     subscription_scan_hour: int = int(os.getenv("SUBSCRIPTION_SCAN_HOUR", "9"))
     subscription_scan_minute: int = int(os.getenv("SUBSCRIPTION_SCAN_MINUTE", "0"))
 
+    # 每日自动抓取（A3）：与订阅扫描同一时钟点，先抓取后扫描
+    auto_crawl_enabled: bool = os.getenv("AUTO_CRAWL_ENABLED", "true").lower() == "true"
+
 
 config = Config()
