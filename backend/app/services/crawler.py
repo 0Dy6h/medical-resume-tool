@@ -21,6 +21,7 @@ from app.services.classifier import (
     infer_profession,
     normalize_text,
 )
+from app.services.http_client import OutboundBlockedError
 
 
 FIXTURE_JOBS: dict[int, list[dict[str, str]]] = {
@@ -233,13 +234,10 @@ def crawl_fixture(institution: dict[str, Any]) -> list[ParsedJob]:
 
 
 async def crawl_generic(institution: dict[str, Any]) -> list[ParsedJob]:
+    from app.services.http_client import build_crawl_client
+
     url = institution["listing_url"]
-    async with httpx.AsyncClient(
-        timeout=12,
-        follow_redirects=True,
-        headers={"User-Agent": "MedicalJobMVP/0.1"},
-        verify=False,  # 允许自签名证书
-    ) as client:
+    async with build_crawl_client() as client:
         response = await client.get(url)
         response.raise_for_status()
     soup = BeautifulSoup(response.text, "html.parser")
@@ -305,10 +303,27 @@ def execute_crawl_run(
         for index, institution in enumerate(institutions):
             try:
                 parsed_jobs = await crawl_institution(institution)
-                for parsed in parsed_jobs:
-                    upsert_job(engine, institution, parsed)
-                    success_count += 1
-                mark_institution(engine, institution["id"], "success")
+            except OutboundBlockedError as exc:
+                failure_count += 1
+                errors.append(
+                    {
+                        "institution_id": institution["id"],
+                        "institution": institution["name"],
+                        "error": str(exc),
+                        "error_type": "outbound_blocked",
+                    }
+                )
+                mark_institution(engine, institution["id"], "failed", str(exc))
+                update_crawl_progress(
+                    engine,
+                    run_id,
+                    success_count=success_count,
+                    failure_count=failure_count,
+                    errors=errors,
+                )
+                if delay and index < len(institutions) - 1:
+                    await asyncio.sleep(delay)
+                continue
             except Exception as exc:  # pragma: no cover - exact network failures vary.
                 failure_count += 1
                 errors.append(
@@ -316,9 +331,43 @@ def execute_crawl_run(
                         "institution_id": institution["id"],
                         "institution": institution["name"],
                         "error": str(exc),
+                        "error_type": "network",
                     }
                 )
                 mark_institution(engine, institution["id"], "failed", str(exc))
+                update_crawl_progress(
+                    engine,
+                    run_id,
+                    success_count=success_count,
+                    failure_count=failure_count,
+                    errors=errors,
+                )
+                if delay and index < len(institutions) - 1:
+                    await asyncio.sleep(delay)
+                continue
+
+            if not parsed_jobs:
+                # A2：零产出视为失败——页面抓取成功但一条岗位都没解析出来，
+                # 大概率是站点结构变化导致适配器失明，绝不能静默标记成功。
+                reason = (
+                    "解析零产出：页面抓取成功但未解析出任何岗位，"
+                    "疑似站点结构变化，需人工复核适配器"
+                )
+                failure_count += 1
+                errors.append(
+                    {
+                        "institution_id": institution["id"],
+                        "institution": institution["name"],
+                        "error": reason,
+                        "error_type": "zero_output",
+                    }
+                )
+                mark_institution(engine, institution["id"], "failed", reason)
+            else:
+                for parsed in parsed_jobs:
+                    upsert_job(engine, institution, parsed)
+                    success_count += 1
+                mark_institution(engine, institution["id"], "success")
             update_crawl_progress(
                 engine,
                 run_id,

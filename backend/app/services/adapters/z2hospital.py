@@ -14,6 +14,7 @@ from bs4 import BeautifulSoup
 
 from app.services.classifier import normalize_text
 from app.services.crawler import ParsedJob, parse_job_from_text
+from app.services.http_client import build_crawl_client
 
 
 _LISTING_SELECTOR = "div.main li"
@@ -97,12 +98,7 @@ def extract_job_from_article(html: str, source_url: str, institution: dict[str, 
 async def crawl_z2hospital(institution: dict[str, Any]) -> list[ParsedJob]:
     """抓取浙大二院招聘列表并逐条解析。"""
     listing_url = institution["listing_url"]
-    async with httpx.AsyncClient(
-        timeout=20,
-        follow_redirects=True,
-        headers={"User-Agent": "MedicalJobMVP/0.1"},
-        verify=False,
-    ) as client:
+    async with build_crawl_client() as client:
         resp = await client.get(listing_url)
         resp.raise_for_status()
         articles = extract_article_links(resp.text, listing_url)

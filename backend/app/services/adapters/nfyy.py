@@ -8,11 +8,11 @@ from __future__ import annotations
 import re
 from typing import Any
 
-import httpx
 from bs4 import BeautifulSoup
 
 from app.services.classifier import normalize_text
 from app.services.crawler import ParsedJob, hash_text, parse_job_from_text, utc_now
+from app.services.http_client import build_crawl_client
 
 # 编号标题模式：（一）...、（二）... 或 1. ... 2. ...
 _SECTION_PATTERN = re.compile(
@@ -83,12 +83,7 @@ def parse_announcement_text(text: str, source_url: str, institution: dict[str, A
 async def crawl_nfyy(institution: dict[str, Any]) -> list[ParsedJob]:
     """抓取南方医院官网招聘公告页并抽取岗位。"""
     listing_url = institution["listing_url"]
-    async with httpx.AsyncClient(
-        timeout=20,
-        follow_redirects=True,
-        headers={"User-Agent": "MedicalJobMVP/0.1"},
-        verify=False,
-    ) as client:
+    async with build_crawl_client() as client:
         resp = await client.get(listing_url)
         resp.raise_for_status()
     return extract_jobs_from_announcement(resp.text, listing_url, institution)

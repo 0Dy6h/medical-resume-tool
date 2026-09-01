@@ -18,25 +18,19 @@ from bs4 import BeautifulSoup
 
 from app.services.attachments import extract_attachment_links
 from app.services.crawler import ParsedJob
+from app.services.http_client import build_crawl_client
 
 logger = logging.getLogger("app.crawler")
 
 XLSX_EXTENSIONS = {".xlsx", ".xls"}
-_HEADERS = {"User-Agent": "MedicalJobMVP/0.1"}
 
 LinkExtractor = Callable[[str, str], list[dict[str, str]]]
 ArticleParser = Callable[..., list[ParsedJob]]
 
 
 def make_client() -> httpx.AsyncClient:
-    """所有适配器共用一套 httpx 客户端配置。"""
-    from app.config import config
-    return httpx.AsyncClient(
-        timeout=config.crawl_timeout,
-        follow_redirects=True,
-        headers=_HEADERS,
-        verify=False,  # 允许自签名证书和证书不匹配
-    )
+    """所有适配器共用一套 httpx 客户端配置（TLS 校验 + 出站安全钩子）。"""
+    return build_crawl_client()
 
 
 def extract_links_by_keyword(
