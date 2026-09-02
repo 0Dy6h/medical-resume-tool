@@ -11,6 +11,7 @@ from app.services.database import (
     rows_to_dicts,
     to_json,
 )
+from app.services.keyword_match import refine_keyword_hits
 from app.schemas import Profile
 
 
@@ -690,6 +691,36 @@ def mark_subscription_read(engine: DatabaseEngine, user_id: int, subscription_id
     return get_subscription(engine, user_id, subscription_id)
 
 
+def find_new_jobs_for_subscription(
+    engine: DatabaseEngine,
+    keyword: str,
+    institution_ids: list[int],
+    last_checked_at: str,
+    limit: int = 100,
+) -> list[dict[str, Any]]:
+    """列出订阅关键词命中、且晚于检查点抓取的岗位（新→旧）。
+
+    SQL LIKE 粗筛后，对纯 ASCII 关键词做词边界精筛（ICU 不命中 RICU）。
+    """
+    if not institution_ids:
+        return []
+    placeholders = ",".join("?" for _ in institution_ids)
+    like = f"%{keyword.strip()}%"
+    with connect(engine) as conn:
+        rows = conn.execute(
+            f"""
+            SELECT id, title, institution_name, raw_text, fetched_at FROM jobs
+            WHERE institution_id IN ({placeholders})
+              AND fetched_at > ?
+              AND (title LIKE ? OR raw_text LIKE ? OR institution_name LIKE ?)
+            ORDER BY fetched_at DESC
+            LIMIT ?
+            """,
+            [*institution_ids, last_checked_at, like, like, like, limit],
+        ).fetchall()
+    return refine_keyword_hits([dict(row) for row in rows], keyword)
+
+
 def count_new_jobs_for_subscription(
     engine: DatabaseEngine,
     keyword: str,
@@ -697,21 +728,7 @@ def count_new_jobs_for_subscription(
     last_checked_at: str,
 ) -> int:
     """Count jobs matching keyword + institution that were fetched after last_checked_at."""
-    if not institution_ids:
-        return 0
-    placeholders = ",".join("?" for _ in institution_ids)
-    like = f"%{keyword}%"
-    with connect(engine) as conn:
-        row = conn.execute(
-            f"""
-            SELECT COUNT(*) AS count FROM jobs
-            WHERE institution_id IN ({placeholders})
-              AND fetched_at > ?
-              AND (title LIKE ? OR raw_text LIKE ? OR institution_name LIKE ?)
-            """,
-            [*institution_ids, last_checked_at, like, like, like],
-        ).fetchone()
-    return int(row["count"])
+    return len(find_new_jobs_for_subscription(engine, keyword, institution_ids, last_checked_at))
 
 
 def has_matching_jobs_last_30d(
@@ -835,14 +852,15 @@ def scan_subscriptions(
     now: datetime,
     user_id: int | None = None,
 ) -> dict[str, Any]:
-    """Scan subscriptions and update last_pushed_at for those with new jobs since last push.
+    """Scan subscriptions and push in-app notifications for new matching jobs.
 
     - Finds jobs fetched after last_pushed_at (falling back to last_checked_at) at
       non-maintenance institutions matching the subscription keyword.
-    - If new jobs are found, advances last_pushed_at to *now*.
+    - If new jobs are found, writes a notification (with a short summary) to the
+      subscription owner and advances last_pushed_at to *now*.
     - Does NOT change last_checked_at or new_count (those are read-checkpoint concepts).
 
-    Returns a summary dict with scanned/pushed counts.
+    Returns a summary dict with scanned/pushed/notified counts.
     """
     now_str = now.isoformat()
     if user_id is not None:
@@ -852,22 +870,133 @@ def scan_subscriptions(
 
     scanned = 0
     pushed = 0
+    notified = 0
     for sub in subs:
         scanned += 1
+        keyword = (sub.get("keyword") or "").strip()
+        if not keyword:
+            continue
         institution_ids = sub["institution_ids"]
         active_ids = filter_active_institution_ids(engine, institution_ids)
         if not active_ids:
             continue
         checkpoint = sub.get("last_pushed_at") or sub["last_checked_at"]
-        count = count_new_jobs_for_subscription(
-            engine, sub["keyword"], active_ids, checkpoint
+        new_jobs = find_new_jobs_for_subscription(engine, keyword, active_ids, checkpoint)
+        if not new_jobs:
+            continue
+        titles = [row["title"] for row in new_jobs[:3]]
+        more = len(new_jobs) - len(titles)
+        summary = "、".join(titles) + (f" 等 {more} 条" if more > 0 else "")
+        create_notification(
+            engine,
+            sub["user_id"],
+            sub["id"],
+            subscription_name=sub["name"],
+            keyword=keyword,
+            job_ids=[row["id"] for row in new_jobs],
+            summary=summary,
+            now_str=now_str,
         )
-        if count > 0:
-            with connect(engine) as conn:
-                conn.execute(
-                    "UPDATE subscriptions SET last_pushed_at = ?, updated_at = ? WHERE id = ?",
-                    (now_str, now_str, sub["id"]),
-                )
-                conn.commit()
-            pushed += 1
-    return {"scanned": scanned, "pushed": pushed}
+        with connect(engine) as conn:
+            conn.execute(
+                "UPDATE subscriptions SET last_pushed_at = ?, updated_at = ? WHERE id = ?",
+                (now_str, now_str, sub["id"]),
+            )
+            conn.commit()
+        pushed += 1
+        notified += 1
+    return {"scanned": scanned, "pushed": pushed, "notified": notified}
+
+
+def create_notification(
+    engine: DatabaseEngine,
+    user_id: int,
+    subscription_id: int,
+    *,
+    subscription_name: str,
+    keyword: str,
+    job_ids: list[int],
+    summary: str,
+    now_str: str,
+) -> int:
+    with connect(engine) as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO notifications (
+                user_id, subscription_id, subscription_name, keyword,
+                job_count, job_ids, summary, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                user_id,
+                subscription_id,
+                subscription_name,
+                keyword,
+                len(job_ids),
+                to_json(job_ids),
+                summary,
+                now_str,
+            ),
+        )
+        conn.commit()
+        return int(cur.lastrowid)
+
+
+def list_notifications(engine: DatabaseEngine, user_id: int, limit: int = 20) -> list[dict[str, Any]]:
+    """用户站内通知（最新在前），附带 unread 计数语义由 count_unread_notifications 提供。"""
+    with connect(engine) as conn:
+        rows = conn.execute(
+            """
+            SELECT * FROM notifications
+            WHERE user_id = ?
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (user_id, limit),
+        ).fetchall()
+    items = []
+    for row in rows:
+        item = dict(row)
+        item["job_ids"] = from_json(item["job_ids"], [])
+        item["read"] = item["read_at"] is not None
+        items.append(item)
+    return items
+
+
+def count_unread_notifications(engine: DatabaseEngine, user_id: int) -> int:
+    with connect(engine) as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) AS count FROM notifications WHERE user_id = ? AND read_at IS NULL",
+            (user_id,),
+        ).fetchone()
+    return int(row["count"])
+
+
+def mark_notification_read(engine: DatabaseEngine, user_id: int, notification_id: int) -> dict[str, Any]:
+    with connect(engine) as conn:
+        row = conn.execute(
+            "SELECT * FROM notifications WHERE id = ? AND user_id = ?",
+            (notification_id, user_id),
+        ).fetchone()
+        if row is None:
+            raise KeyError(notification_id)
+        conn.execute(
+            "UPDATE notifications SET read_at = ? WHERE id = ? AND read_at IS NULL",
+            (now_iso(), notification_id),
+        )
+        conn.commit()
+    item = dict(row)
+    item["job_ids"] = from_json(item["job_ids"], [])
+    item["read"] = True
+    return item
+
+
+def mark_all_notifications_read(engine: DatabaseEngine, user_id: int) -> int:
+    """全部标记已读，返回本次标记的条数。"""
+    with connect(engine) as conn:
+        cur = conn.execute(
+            "UPDATE notifications SET read_at = ? WHERE user_id = ? AND read_at IS NULL",
+            (now_iso(), user_id),
+        )
+        conn.commit()
+        return int(cur.rowcount)

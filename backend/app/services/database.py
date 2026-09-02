@@ -197,6 +197,21 @@ def init_db(engine: DatabaseEngine) -> None:
     );
 
             CREATE INDEX IF NOT EXISTS idx_subscriptions_user ON subscriptions(user_id);
+
+            CREATE TABLE IF NOT EXISTS notifications (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                subscription_id INTEGER NOT NULL REFERENCES subscriptions(id) ON DELETE CASCADE,
+                subscription_name TEXT NOT NULL,
+                keyword TEXT NOT NULL,
+                job_count INTEGER NOT NULL,
+                job_ids TEXT NOT NULL,
+                summary TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                read_at TEXT
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id);
             """
         )
         _migrate_subscriptions_add_last_pushed_at(conn)

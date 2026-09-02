@@ -4,6 +4,7 @@ import type {
  Institution,
  JobDetail,
  JobList,
+ NotificationItem,
  Profile,
  ProfileImportResult,
  Report,
@@ -132,6 +133,12 @@ export const api = {
   },
   crawlRun: (id: number) => request<CrawlRun>(`/api/crawl-runs/${id}`),
   crawlRuns: (limit = 10) => request<CrawlRun[]>(`/api/crawl-runs?limit=${limit}`),
+  notifications: (limit = 20) => request<NotificationItem[]>(`/api/notifications?limit=${limit}`),
+  unreadCount: () => request<{ count: number }>("/api/notifications/unread-count"),
+  markNotificationRead: (id: number) =>
+    request<NotificationItem>(`/api/notifications/${id}/read`, { method: "POST" }),
+  markAllNotificationsRead: () =>
+    request<{ marked: number }>("/api/notifications/read-all", { method: "POST" }),
   analytics: (trust?: string) =>
     request<AnalyticsSummary>(`/api/analytics/summary${trust && trust !== "all" ? `?trust=${trust}` : ""}`),
   profile: () => request<Profile>("/api/profile"),

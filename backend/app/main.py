@@ -24,6 +24,7 @@ from app.schemas import (
     JobStatusOut,
     JobStatusPayload,
     LoginPayload,
+    NotificationOut,
     Profile,
     ProfileImportOut,
     ProfilePayload,
@@ -56,6 +57,7 @@ from app.services.repositories import (
     count_new_jobs_for_subscription,
     count_total_jobs_in_institutions,
     count_total_matching_jobs,
+    count_unread_notifications,
     create_crawl_run,
     create_subscription,
     create_user,
@@ -76,7 +78,10 @@ from app.services.repositories import (
     list_institutions,
     list_job_snapshots,
     list_jobs,
+    list_notifications,
     list_subscriptions,
+    mark_all_notifications_read,
+    mark_notification_read,
     mark_subscription_read,
     list_resume_drafts_by_user,
     list_resume_drafts,
@@ -656,6 +661,41 @@ def create_app(database_url: str | None = None) -> FastAPI:
         user: Annotated[dict, Depends(get_current_user)],
     ) -> dict:
         return scan_subscriptions(engine, datetime.now(timezone.utc), user_id=user["id"])
+
+    # ── Notifications (B2 订阅触达：站内通知) ──────────────────────────
+
+    @app.get("/api/notifications", response_model=list[NotificationOut])
+    def notifications_endpoint(
+        engine: Annotated[DatabaseEngine, Depends(get_engine)],
+        user: Annotated[dict, Depends(get_current_user)],
+        limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    ) -> list[dict]:
+        return list_notifications(engine, user["id"], limit)
+
+    @app.get("/api/notifications/unread-count")
+    def unread_count_endpoint(
+        engine: Annotated[DatabaseEngine, Depends(get_engine)],
+        user: Annotated[dict, Depends(get_current_user)],
+    ) -> dict:
+        return {"count": count_unread_notifications(engine, user["id"])}
+
+    @app.post("/api/notifications/{notification_id}/read", response_model=NotificationOut)
+    def mark_notification_read_endpoint(
+        notification_id: int,
+        engine: Annotated[DatabaseEngine, Depends(get_engine)],
+        user: Annotated[dict, Depends(get_current_user)],
+    ) -> dict:
+        try:
+            return mark_notification_read(engine, user["id"], notification_id)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="通知不存在") from None
+
+    @app.post("/api/notifications/read-all")
+    def mark_all_notifications_read_endpoint(
+        engine: Annotated[DatabaseEngine, Depends(get_engine)],
+        user: Annotated[dict, Depends(get_current_user)],
+    ) -> dict:
+        return {"marked": mark_all_notifications_read(engine, user["id"])}
 
     return app
 

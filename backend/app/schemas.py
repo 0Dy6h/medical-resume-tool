@@ -575,6 +575,13 @@ class SubscriptionCreate(BaseModel):
                 raise ValueError("机构数量必须在 1-12 之间")
         return value
 
+    @field_validator("keyword")
+    @classmethod
+    def _check_keyword_not_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("关键词不能为空")
+        return value.strip()
+
 
 class SubscriptionOut(BaseModel):
     """Subscription with push status for the frontend."""
@@ -595,3 +602,17 @@ class SubscriptionScanOut(BaseModel):
     """Result of a subscription scan."""
     scanned: int
     pushed: int
+    notified: int = 0
+
+
+class NotificationOut(BaseModel):
+    """站内通知（B2 订阅触达）：一次订阅扫描产生的新岗位摘要。"""
+    id: int
+    subscription_id: int
+    subscription_name: str
+    keyword: str
+    job_count: int
+    job_ids: list[int]
+    summary: str
+    created_at: str
+    read: bool

@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "./components/AuthContext";
+import { NotificationBell } from "./components/NotificationBell";
 import { AnalyticsPage } from "./pages/AnalyticsPage";
 import { CrawlPage } from "./pages/CrawlPage";
 import { JobsPage } from "./pages/JobsPage";
@@ -133,7 +134,10 @@ export default function App() {
             <span className="eyebrow">本地 MVP</span>
             <h2>{activePage.label}</h2>
           </div>
-          <div className="topbar-badge">公开官网样本 · 真实履历重组</div>
+          <div className="topbar-right">
+            <NotificationBell />
+            <div className="topbar-badge">公开官网样本 · 真实履历重组</div>
+          </div>
         </header>
         <div className="content-area" ref={contentAreaRef}>
           {/* B1: Page transition — key changes on every page switch to re-trigger the animation */}

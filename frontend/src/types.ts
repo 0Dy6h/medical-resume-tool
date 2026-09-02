@@ -86,6 +86,18 @@ export type JobSnapshot = {
   captured_at: string;
 };
 
+export type NotificationItem = {
+  id: number;
+  subscription_id: number;
+  subscription_name: string;
+  keyword: string;
+  job_count: number;
+  job_ids: number[];
+  summary: string;
+  created_at: string;
+  read: boolean;
+};
+
 export type JobDetail = Job & {
   raw_snapshot: {
     source_url: string;
