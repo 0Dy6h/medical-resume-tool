@@ -43,6 +43,39 @@ cd frontend
 pnpm dev
 ```
 
+### 纯 cmd 命令启动/停止（不用任何脚本）
+
+在 cmd（管理员不需要）里，从仓库根目录执行。每个命令占一个 cmd 窗口，
+窗口开着服务就在，关窗口即停止该服务——适合想直接看日志的场景：
+
+```bat
+:: 后端（--directory 让 app 包可导入，无需 cd）
+uv run --project backend --directory backend python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+
+:: 前端（另开一个 cmd；CI=true 跳过 pnpm 的依赖交互检查）
+set CI=true
+cd frontend
+pnpm dev --host 127.0.0.1 --port 5173
+```
+
+不想留窗口时用 `start /min` 后台化：
+
+```bat
+start "medical-backend" /min uv run --project backend --directory backend python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+start "medical-frontend" /min cmd /c "set CI=true&& cd /d frontend&& pnpm dev --host 127.0.0.1 --port 5173"
+```
+
+停止（cmd 自带命令，按端口找到 PID 再杀进程树）：
+
+```bat
+netstat -ano | findstr ":8000 :5173"
+taskkill /PID <后端PID> /T /F
+taskkill /PID <前端PID> /T /F
+```
+
+> 后台化窗口停止更简单的办法：`taskkill /FI "WINDOWTITLE eq medical-backend*" /T /F`
+> （前端窗口同理，标题即 start 的第一个参数）。
+
 URLs:
 
 - Frontend: `http://127.0.0.1:5173`
