@@ -5,6 +5,8 @@
 ## 当前能力
 
 - 30 家中国大陆医疗相关机构种子，其中 12 家当前启用：前 6 家内置本地演示 fixture，另有 6 家公开官网真实适配器。
+- 每日 09:00 自动抓取全部启用机构并扫描订阅推送（单飞互斥、失败留痕、连续失败进入需复核状态）；抓取支持一键重跑。
+- 订阅新岗位产生站内通知（顶栏铃铛），含新岗位标题摘要；英文关键词按词边界匹配。
 - FastAPI + SQLite 后端，提供计划中的核心 REST API。
 - React/Vite 工作台：总览、岗位库、分析、我的履历、简历生成、抓取任务。
 - 规则化岗位抽取、去重、标签、分析报告，并支持从公开官网公告的 xlsx 附件中抽取岗位表。
@@ -18,16 +20,19 @@
 ## 项目文档
 
 - 架构说明：`docs/architecture.md`
-- 运维/启动手册：`docs/runbook.md`
+- 领域词汇与核心概念：`CONTEXT.md`
+- 运维/启动手册（本地开发）：`docs/runbook.md`
+- 服务器部署指南：`docs/deploy.md`
 - Agent 接手规则：`AGENTS.md`
-- 当前交接：`docs/handoffs/2026-07-26-end-of-day.md`
-- 当前线上部署记录：`docs/deployments/tencent-cloud-cvm-2026-06-18/README.md`
+- 当前交接：`docs/handoffs/2026-09-02-workspace-and-startup.md`
+- 架构决策记录：`docs/adr/index.md`
+- 历史线上部署记录：`docs/deployments/tencent-cloud-cvm-2026-06-18/README.md`
 
 ## 后端
 
 ```powershell
 uv run --project backend pytest -q
-uv run --project backend uvicorn app.main:app --host 127.0.0.1 --port 8000
+cd backend; uv run --project . python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
 健康检查：
