@@ -35,6 +35,8 @@ export function CrawlPage() {
   const [selected, setSelected] = useState<Set<number>>(new Set([1, 2, 3, 4, 5, 6]));
   const [run, setRun] = useState<CrawlRun | null>(null);
   const [recentRuns, setRecentRuns] = useState<CrawlRun[]>([]);
+  const [health, setHealth] = useState<{ threshold: number; review_count: number; institutions: Institution[] } | null>(null);
+  const [recrawling, setRecrawling] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const pollRef = useRef<number | null>(null);
 
@@ -43,6 +45,14 @@ export function CrawlPage() {
       setInstitutions(await api.institutions());
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "加载机构失败");
+    }
+  }
+
+  async function refreshHealth() {
+    try {
+      setHealth(await api.institutionsHealth());
+    } catch {
+      // 健康视图加载失败不打断主流程
     }
   }
 
@@ -60,6 +70,7 @@ export function CrawlPage() {
   useEffect(() => {
     void refresh();
     void refreshRuns();
+    void refreshHealth();
     return () => {
       if (pollRef.current) window.clearInterval(pollRef.current);
     };
@@ -80,6 +91,7 @@ export function CrawlPage() {
           pollRef.current = null;
           await refresh();
           await refreshRuns();
+          await refreshHealth();
           if (payload.status === "completed") {
             toast.success(`抓取完成：成功 ${payload.success_count} 条`);
           } else if (payload.status === "partial") {
@@ -107,6 +119,20 @@ export function CrawlPage() {
       toast.error(error instanceof Error ? error.message : "启动抓取失败");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function recrawl(id: number) {
+    setRecrawling(id);
+    try {
+      const payload = await api.recrawlInstitution(id);
+      setRun(payload);
+      toast.info(`已重跑机构 #${id}`);
+      poll(payload.id);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "重跑失败");
+    } finally {
+      setRecrawling(null);
     }
   }
 
@@ -155,6 +181,36 @@ export function CrawlPage() {
           </button>
         </div>
       </div>
+
+      {health && health.review_count > 0 && (
+        <section className="panel">
+          <div className="panel-head">
+            <div>
+              <h2>数据健康告警</h2>
+              <p className="subtle">
+                连续 {health.threshold} 次抓取失败的机构需人工复核（疑似站点结构变化或网络不可达）
+              </p>
+            </div>
+          </div>
+          <div className="error-strip">
+            {health.institutions.map((item) => (
+              <div className="error-item" key={item.id}>
+                <strong>{item.name}</strong>
+                <span>
+                  连续失败 {item.consecutive_failures} 次 · {item.last_error ?? "未知原因"}
+                </span>
+                <button
+                  className="text-button"
+                  disabled={crawling || recrawling !== null}
+                  onClick={() => recrawl(item.id)}
+                >
+                  {recrawling === item.id ? "重跑中…" : "一键重跑"}
+                </button>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {run && (
         <section className="panel run-panel run-panel-detail">
@@ -288,6 +344,9 @@ export function CrawlPage() {
                         <>
                           <StatusPill value={item.last_status} />
                           {item.last_error && <span className="status-error">{item.last_error}</span>}
+                          {(item.consecutive_failures ?? 0) > 1 && (
+                            <span className="tag">连续失败 {item.consecutive_failures} 次</span>
+                          )}
                         </>
                       )}
                     </div>

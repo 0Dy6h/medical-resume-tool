@@ -267,16 +267,41 @@ def list_job_snapshots(engine: DatabaseEngine, job_id: int, limit: int = 20) -> 
     return [dict(row) for row in rows]
 
 
+FAILURE_REVIEW_THRESHOLD = 2  # 连续失败达到该次数即进入 review 状态（B1）
+
+
 def mark_institution(engine: DatabaseEngine, institution_id: int, status: str, error: str | None = None) -> None:
+    """记录单机构最近一次抓取结果，并维护连续失败计数（B1 健康度）。
+
+    - 成功：计数清零；
+    - 失败：计数 +1，达到 FAILURE_REVIEW_THRESHOLD 后 last_status 升级为
+      'review'，提示需要人工复核（连续失败 / 持续失明）。
+    """
+    now = now_iso()
     with connect(engine) as conn:
-        conn.execute(
-            """
-            UPDATE institutions
-            SET last_crawled_at = ?, last_status = ?, last_error = ?
-            WHERE id = ?
-            """,
-            (now_iso(), status, error, institution_id),
-        )
+        if status == "success":
+            conn.execute(
+                """
+                UPDATE institutions
+                SET last_crawled_at = ?, last_status = ?, last_error = ?, consecutive_failures = 0
+                WHERE id = ?
+                """,
+                (now, status, error, institution_id),
+            )
+        else:
+            conn.execute(
+                """
+                UPDATE institutions
+                SET last_crawled_at = ?, last_error = ?,
+                    consecutive_failures = consecutive_failures + 1,
+                    last_status = CASE
+                        WHEN consecutive_failures + 1 >= ? THEN 'review'
+                        ELSE ?
+                    END
+                WHERE id = ?
+                """,
+                (now, error, FAILURE_REVIEW_THRESHOLD, status, institution_id),
+            )
         conn.commit()
 
 

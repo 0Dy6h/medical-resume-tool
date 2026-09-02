@@ -95,22 +95,29 @@ async def guard_request(request: httpx.Request) -> None:
 
 
 async def guard_response(response: httpx.Response) -> None:
-    """响应级安全钩子：Content-Length 预检 + 已下载字节兜底。"""
+    """响应级安全钩子：Content-Length 预检 + 已下载字节兜底。
+
+    注意钩子触发时响应体往往尚未读入（is_stream_http_response），此时
+    response.content 会抛 ResponseNotRead——只能依赖 Content-Length 预检，
+    已读场景（无 Content-Length 的分块响应）再按实际字节兜底。
+    """
     length_header = response.headers.get("content-length")
     if length_header:
         try:
             length = int(length_header)
         except ValueError:
-            return
-        if length > MAX_RESPONSE_BYTES:
+            length = None
+        if length is not None and length > MAX_RESPONSE_BYTES:
             raise OutboundBlockedError(
                 f"响应过大（Content-Length={length} > {MAX_RESPONSE_BYTES}）"
             )
-    body = getattr(response, "content", b"")
+    try:
+        body = response.content
+    except httpx.ResponseNotRead:
+        # 流式响应尚未读入：交由 Content-Length 预检把关，读取阶段不再拦截
+        return
     if body and len(body) > MAX_RESPONSE_BYTES:
-        raise OutboundBlockedError(
-            f"响应过大（{len(body)} 字节 > {MAX_RESPONSE_BYTES}）"
-        )
+        raise OutboundBlockedError(f"响应过大（{len(body)} 字节 > {MAX_RESPONSE_BYTES}）")
 
 
 def build_crawl_client() -> httpx.AsyncClient:

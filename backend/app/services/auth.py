@@ -3,6 +3,8 @@
 零外部依赖，全部基于标准库：
 - 密码：scrypt + 随机盐，verify 用 hmac.compare_digest 防时序攻击。
 - 会话：自签名 token，格式 base64url(payload).hmac_sig，payload 含 uid/name/exp。
+- 密钥（D2）：优先环境变量 AUTH_SECRET；未设置时自动生成并持久化到
+  data/.auth_secret，进程重启不掉线。0600 权限，禁止入库。
 """
 from __future__ import annotations
 
@@ -13,19 +15,49 @@ import json
 import logging
 import os
 import secrets
+import stat
+import sys
 import time
+from pathlib import Path
 
 
 logger = logging.getLogger(__name__)
 
-# 签名密钥：部署时务必通过环境变量 AUTH_SECRET 固定，否则进程重启后已签发的 token 全部失效。
-SECRET = os.getenv("AUTH_SECRET") or secrets.token_hex(32)
+
+def _load_or_create_secret() -> tuple[str, bool]:
+    """返回 (secret, is_persistent)。环境变量优先；否则落盘复用。"""
+    env_secret = os.getenv("AUTH_SECRET")
+    if env_secret:
+        return env_secret, False
+
+    data_dir = Path(os.getenv("DATA_DIR", "data"))
+    secret_path = data_dir / ".auth_secret"
+    try:
+        if secret_path.exists():
+            stored = secret_path.read_text(encoding="utf-8").strip()
+            if stored:
+                return stored, True
+        secret = secrets.token_hex(32)
+        secret_path.parent.mkdir(parents=True, exist_ok=True)
+        secret_path.write_text(secret + "\n", encoding="utf-8")
+        if sys.platform != "win32":
+            os.chmod(secret_path, stat.S_IRUSR | stat.S_IWUSR)  # 0600
+        return secret, True
+    except OSError:
+        # 文件系统只读等场景退回临时密钥（与旧行为一致），但显式告警
+        logger.warning(
+            "AUTH_SECRET 无法持久化（%s），回退为进程内临时密钥，重启将掉线", secret_path
+        )
+        return secrets.token_hex(32), False
+
+
+SECRET, _SECRET_PERSISTED = _load_or_create_secret()
 
 if not os.getenv("AUTH_SECRET"):
-    logger.warning(
-        "AUTH_SECRET 未设置，已生成临时密钥；进程重启后所有已签发的登录 token 将立即失效。"
-        "生产部署请通过环境变量固定 AUTH_SECRET。"
-    )
+    if _SECRET_PERSISTED:
+        logger.info("AUTH_SECRET 未设置，已生成并持久化到 data/.auth_secret（重启不掉线）")
+    else:
+        logger.warning("AUTH_SECRET 未设置且无法持久化，重启后所有 token 将失效")
 
 TOKEN_TTL_SECONDS = 7 * 24 * 3600
 _SCRYPT_PARAMS = {"n": 2**14, "r": 8, "p": 1, "dklen": 32}

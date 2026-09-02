@@ -175,6 +175,64 @@ def create_app(database_url: str | None = None) -> FastAPI:
                 item["blocked_reason"] = BLOCKED_REASONS.get(item["id"], "尚未适配该站点，暂未启用")
         return items
 
+    @app.get("/api/institutions/health")
+    def institutions_health(
+        engine: Annotated[DatabaseEngine, Depends(get_engine)],
+        user: Annotated[dict, Depends(get_current_user)],
+    ) -> dict:
+        """B1 数据健康视图：连续失败达到阈值的机构进入 review 状态，可一键重跑。"""
+        from app.services.repositories import FAILURE_REVIEW_THRESHOLD
+
+        items = list_institutions(engine)
+        unhealthy = [
+            {
+                "id": item["id"],
+                "name": item["name"],
+                "crawl_strategy": item["crawl_strategy"],
+                "enabled": item["enabled"],
+                "last_status": item["last_status"],
+                "last_error": item["last_error"],
+                "consecutive_failures": item.get("consecutive_failures", 0),
+            }
+            for item in items
+            if item.get("consecutive_failures", 0) >= FAILURE_REVIEW_THRESHOLD
+        ]
+        return {
+            "threshold": FAILURE_REVIEW_THRESHOLD,
+            "review_count": len(unhealthy),
+            "institutions": unhealthy,
+        }
+
+    @app.post("/api/institutions/{institution_id}/recrawl", response_model=CrawlRunOut, status_code=201)
+    def recrawl_institution(
+        institution_id: int,
+        engine: Annotated[DatabaseEngine, Depends(get_engine)],
+        user: Annotated[dict, Depends(get_current_user)],
+    ) -> dict:
+        """B1 一键重跑：对单个机构立即触发一次抓取（与手动抓取同样的单飞约束）。"""
+        from app.config import config
+        from app.services.crawler import release_crawl_slot, try_acquire_crawl_slot
+
+        institutions_to_crawl = get_institutions_by_ids(engine, [institution_id])
+        if not institutions_to_crawl or not institutions_to_crawl[0]["enabled"]:
+            raise HTTPException(status_code=400, detail="该机构不存在或尚未适配，无法抓取")
+        if not try_acquire_crawl_slot():
+            raise HTTPException(status_code=409, detail="已有抓取任务在进行中，请等待完成后再试")
+
+        run_id = create_crawl_run(engine, [institution_id], trigger="manual")
+
+        def _crawl_then_scan() -> None:
+            try:
+                execute_crawl_run(
+                    engine, run_id, institutions_to_crawl, config.crawl_delay_seconds
+                )
+            finally:
+                release_crawl_slot()
+                scan_subscriptions(engine, datetime.now(timezone.utc))
+
+        threading.Thread(target=_crawl_then_scan, daemon=True).start()
+        return get_crawl_run(engine, run_id)
+
     @app.post("/api/crawl-runs", response_model=CrawlRunOut, status_code=201)
     def start_crawl(
         payload: CrawlRunCreate,

@@ -16,3 +16,5 @@ logs/
 *.tsbuildinfo
 .claude/settings.json
 .claude/settings.local.json
+.auth_secret
+backend/data/.auth_secret

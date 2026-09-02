@@ -79,7 +79,8 @@ def init_db(engine: DatabaseEngine) -> None:
                 enabled INTEGER NOT NULL DEFAULT 1,
                 last_crawled_at TEXT,
                 last_status TEXT DEFAULT 'never',
-                last_error TEXT
+                last_error TEXT,
+                consecutive_failures INTEGER NOT NULL DEFAULT 0
             );
 
             CREATE TABLE IF NOT EXISTS crawl_runs (
@@ -217,6 +218,8 @@ def init_db(engine: DatabaseEngine) -> None:
         _migrate_subscriptions_add_last_pushed_at(conn)
         _migrate_crawl_runs_add_trigger(conn)
         _migrate_jobs_identity_key(conn)
+        _migrate_institutions_add_consecutive_failures(conn)
+        _repair_adapter_seed_urls(conn)
         _migrate_user_scoped_tables(conn)
         count = conn.execute("SELECT COUNT(*) AS count FROM institutions").fetchone()["count"]
         if count == 0:
@@ -246,6 +249,40 @@ def _migrate_crawl_runs_add_trigger(conn: sqlite3.Connection) -> None:
     cols = {row["name"] for row in conn.execute("PRAGMA table_info(crawl_runs)").fetchall()}
     if cols and "trigger" not in cols:
         conn.execute("ALTER TABLE crawl_runs ADD COLUMN trigger TEXT NOT NULL DEFAULT 'manual'")
+
+
+def _migrate_institutions_add_consecutive_failures(conn: sqlite3.Connection) -> None:
+    """B1 健康度：既有库的 institutions 补 consecutive_failures 列。"""
+    cols = {row["name"] for row in conn.execute("PRAGMA table_info(institutions)").fetchall()}
+    if cols and "consecutive_failures" not in cols:
+        conn.execute(
+            "ALTER TABLE institutions ADD COLUMN consecutive_failures INTEGER NOT NULL DEFAULT 0"
+        )
+
+
+def _repair_adapter_seed_urls(conn: sqlite3.Connection) -> None:
+    """修复存量损坏：适配器机构的 listing_url 被降级为其 official_url（首页）。
+
+    历史会话曾把 7-30 号机构的 listing_url 整体覆写为首页 URL，导致适配器
+    抓取首页而非招聘列表页（零产出）。seeds.py 是这些字段的权威来源，
+    这里按 seed 对 crawl_strategy 非 generic 的机构恢复 listing_url 与
+    crawl_strategy；仅当现值确实被降级（等于 official_url）时才写回，
+    保留用户日后手动指向新列表页的能力。
+    """
+    seed_by_id = {item["id"]: item for item in SEED_INSTITUTIONS}
+    rows = conn.execute(
+        "SELECT id, listing_url, crawl_strategy FROM institutions"
+    ).fetchall()
+    for row in rows:
+        seed = seed_by_id.get(row["id"])
+        if seed is None or seed["crawl_strategy"] == "generic":
+            continue
+        # 仅修复"listing_url 被写成 official_url（首页）"的降级场景
+        if row["listing_url"] == seed["official_url"] and seed["listing_url"] != seed["official_url"]:
+            conn.execute(
+                "UPDATE institutions SET listing_url = ?, crawl_strategy = ? WHERE id = ?",
+                (seed["listing_url"], seed["crawl_strategy"], row["id"]),
+            )
 
 
 def _jobs_has_url_only_unique(conn: sqlite3.Connection) -> bool:
