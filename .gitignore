@@ -18,3 +18,9 @@ logs/
 .claude/settings.local.json
 .auth_secret
 backend/data/.auth_secret
+frontend/.pnpm-store/
+medical-job-prd/
+.dsh-vision-toolkit/
+.trae-html-share-packages/
+.workbuddy/
+log

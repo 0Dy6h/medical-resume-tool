@@ -82,6 +82,23 @@ function Stop-ServiceByPidFile {
     }
 }
 
+function Stop-StrayListener {
+    param([int]$Port, [string]$Label)
+    # PID 文件失效时（如服务由其他会话启动），按端口强停——但仅限确认是本项目的
+    # python/node 进程，避免误杀恰好占用同一端口的其他程序。
+    $conn = Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+    if ($null -eq $conn) { return $true }
+    $proc = Get-Process -Id $conn.OwningProcess -ErrorAction SilentlyContinue
+    if ($null -eq $proc -or ($proc.ProcessName -notin @('python', 'node'))) {
+        Write-ErrorLine "端口 $Port 被非本项目进程占用 (PID $($conn.OwningProcess), $($proc.ProcessName))，已跳过。"
+        return $false
+    }
+    Write-Host "  停止 $Label (按端口发现 PID $($proc.Id), $($proc.ProcessName)) ..."
+    & taskkill.exe /PID $proc.Id /T /F 2>$null | Out-Null
+    return $?
+}
+
 # ---------------------------------------------------------------------------
 # 停止模式
 # ---------------------------------------------------------------------------
@@ -91,17 +108,21 @@ if ($Stop) {
     Stop-ServiceByPidFile (Join-Path $LogDir 'frontend.pid') '前端'
     Start-Sleep -Milliseconds 800
 
+    # PID 文件失效（服务非本脚本启动或 PID 被复用）时，按端口兜底强停
     $backendFree  = Test-PortBindable $BackendPort
     $frontendFree = Test-PortBindable $FrontendPort
-    $allFree = $backendFree -and $frontendFree
-    if ($allFree) {
+    if (-not $backendFree)  { $backendFree  = Stop-StrayListener -Port $BackendPort  -Label '后端' }
+    if (-not $frontendFree) { $frontendFree = Stop-StrayListener -Port $FrontendPort -Label '前端' }
+    Start-Sleep -Milliseconds 500
+
+    if ($backendFree -and $frontendFree) {
         Write-Host '  服务已全部停止，端口已释放。' -ForegroundColor Green
     } else {
-        Write-ErrorLine "仍有进程占用端口（PID 文件可能失效或进程非本脚本启动）："
+        Write-ErrorLine '仍有端口未释放，请手动排查：'
         Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
             Where-Object { $_.LocalPort -in $BackendPort, $FrontendPort } |
             ForEach-Object { Write-Host "    端口 $($_.LocalPort) <- PID $($_.OwningProcess) ($((Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue).ProcessName))" }
-        Write-Host '  如需强制停止，请自行确认后 taskkill /PID <pid> /T /F。'
+        exit 1
     }
     exit 0
 }
