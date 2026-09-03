@@ -4,7 +4,7 @@
 
 This repo is a local MVP for Chinese medical job intelligence and truthful resume tailoring. It has a FastAPI/SQLite backend and a React/Vite frontend.
 
-Read `CONTEXT.md` first for the domain vocabulary (trust levels A1, job identity A4, truthful-resume constraints, crawl singleflight). Those concepts each have one authoritative implementation location listed there — do not reinvent them elsewhere. Decision history lives in `docs/adr/`; runbook in `docs/runbook.md`; architecture overview in `docs/architecture.md`; end-user guide in `docs/user-guide.md`; outdated top-level reports are parked in `docs/archive/`.
+Read `CONTEXT.md` first for the domain vocabulary (trust levels A1, job identity A4, truthful-resume constraints, crawl singleflight). Those concepts each have one authoritative implementation location listed there — do not reinvent them elsewhere. Decision history lives in `docs/adr/`; runbook in `docs/runbook.md`; architecture overview in `docs/architecture.md`; end-user guide in `docs/user-guide.md`; dated execution plans in `docs/plans/`; deployment guide in `docs/deploy.md`; outdated top-level reports are parked in `docs/archive/`.
 
 ## Core Boundaries
 
@@ -55,6 +55,7 @@ pnpm dev
 - `backend/app/services/crawler.py` - fixture and generic crawler/parser, adapter dispatch.
 - `backend/app/services/attachments.py` - attachment discovery, xlsx table parsing, and attachment-derived job construction.
 - `backend/app/services/repositories.py` - data access layer plus data-trust classification (`classify_job_trust`).
+- `backend/app/services/analytics.py` - analytics/report aggregation for the overview page; slices follow the trust classification (never counts `placeholder` as real).
 - `backend/app/services/scheduler.py` - daily maintenance loop (auto-crawl then subscription scan) plus startup catch-up (`maybe_catch_up`: if no `trigger='auto'` crawl ran in the last 24h, one runs immediately at startup). The singleflight lock `try_acquire_crawl_slot` is defined in `crawler.py`; the scheduler only borrows it.
 - `backend/app/services/http_client.py` - outbound fetch client: TLS enforced, private/loopback/cloud-metadata targets blocked, 10MB response cap.
 - `backend/app/services/auth.py` - stdlib-only auth (scrypt passwords, self-signed HMAC session tokens; secret from `AUTH_SECRET` or persisted `data/.auth_secret`).
@@ -65,6 +66,9 @@ pnpm dev
 - `backend/app/services/adapters/hrbmu.py` - 哈尔滨医科大学 listing+table parser.
 - `backend/app/services/adapters/bjmu.py` - 北京大学医学部 listing+announcement parser.
 - `backend/app/services/classifier.py` - rule-based category and tag extraction; still writes the persisted `jobs.requirements` column and job filters (do not change without a data migration).
+- `backend/app/services/keyword_match.py` - subscription keyword semantics: non-ASCII keywords match by substring, pure-ASCII keywords match case-insensitively on word boundaries («ICU» must not hit «RICU»). `refine_keyword_hits` post-filters SQL LIKE results.
+- `backend/app/services/profile_checks.py` - pure profile boundary checks (PRD 4.3): education/experience time-overlap detection (>50 % of the shorter range; unparseable dates never warn) and draft-reference counting by exact `profile_field_id`.
+- `backend/app/services/profile_import/` - 履历资料导入 pipeline: docx/image text extraction (image OCR via pytesseract), fact extraction + normalization, and profile-contract construction (`pipeline.build_profile_contract`); legacy entry points are re-exported from the package `__init__`. Image OCR needs a local tesseract binary (`TESSERACT_CMD` env var); when absent it degrades gracefully — docx text still works, image text is skipped.
 - `backend/app/services/matching/` - requirement segmentation (`segment.py`), CJK bigram tokenizer (`tokenize.py`), IDF-weighted semantic scorer (`scorer.py`), and the arithmetic degree gate (`gates.py`). `app/data/jd_idf.json` is the committed IDF table, rebuilt offline by `backend/scripts/build_idf.py`. Eligibility clauses (国籍/年龄/身体条件/遵纪守法 — `is_eligibility_clause` in `segment.py`) are excluded in the matching layer (`resume.py` skips them), NOT inside `segment.py`: mixed clauses containing degree words must stay visible to the degree gate, and both `test_jd_segmenter` and `test_matching_eval` pin this placement.
 - `backend/app/services/resume.py` - profile-to-job matching (delegates to `matching/`) and truthful resume draft generation.
 - `backend/app/services/exporter.py` - DOCX/PDF export.
@@ -75,7 +79,9 @@ pnpm dev
 - `backend/fixtures/hrbmu/` - 哈尔滨医科大学 fixture HTML.
 - `backend/fixtures/bjmu/` - 北京大学医学部 fixture HTML.
 - `frontend/src/App.tsx` - frontend shell and navigation.
-- `frontend/src/pages/` - workbench pages.
+- `frontend/src/pages/` - workbench pages (tests live alongside as `*.test.ts`).
+- `backend/scripts/` - offline utilities run from `backend/`: `build_idf.py` (IDF table), `export_preview.py`, `measure_jobs_layout.py`.
+- `medical-job-prd/` - self-contained product PRD (static HTML, no build step).
 - `docs/handoffs/` - session continuation notes.
 
 ## Verification Discipline
