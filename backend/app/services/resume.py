@@ -7,7 +7,7 @@ from app.schemas import PROFILE_COLLECTION_NAMES, Profile
 from app.services.classifier import normalize_text
 from app.services.matching.gates import DegreeGateResult, evaluate_degree_gate
 from app.services.matching.scorer import best_matches, strength_band
-from app.services.matching.segment import is_eligibility_clause, segment_requirements
+from app.services.matching.segment import is_benefits_clause, is_eligibility_clause, segment_requirements
 from app.services.repositories import get_profile
 
 if TYPE_CHECKING:
@@ -132,6 +132,11 @@ def match_profile_to_job(profile: Profile, job: dict[str, Any]) -> tuple[list[di
         # they would always render as red "不满足" noise.  They stay visible in
         # the job's raw announcement text and are the applicant's to confirm.
         if is_eligibility_clause(requirement):
+            continue
+        # Compensation/benefits clauses (岗位待遇…面议) are employer promises,
+        # not facts the profile can evidence; counting them inflates
+        # "满足 X/Y 项" with permanently unmet rows.
+        if is_benefits_clause(requirement):
             continue
         gate = evaluate_degree_gate(requirement, education)
         if gate is not None:

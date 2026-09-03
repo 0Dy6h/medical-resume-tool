@@ -1137,3 +1137,44 @@ def test_subscription_response_has_last_pushed_at(tmp_path):
     data = resp.json()
     assert "last_pushed_at" in data
     assert data["last_pushed_at"] is not None
+
+
+def test_count_total_matching_jobs_respects_ascii_word_boundary(tmp_path):
+    """总数统计与扫描口径一致：ICU 不得把 RICU 计入（B2 词边界语义）。"""
+    client = make_client(tmp_path)
+    engine = client.app.state.engine
+    seed_jobs(engine, [
+        {
+            "institution_id": 1,
+            "institution_name": "测试医院",
+            "institution_type": "医院",
+            "region": "北京",
+            "title": "ICU 护士招聘",
+            "source_url": "https://example.com/icu",
+            "source_text_hash": "h-icu",
+            "raw_text": "重症监护室 ICU 护士招聘启事",
+            "parser_name": "test",
+            "job_category": "护理",
+            "confidence": 0.9,
+            "fetched_at": iso_now(),
+        },
+        {
+            "institution_id": 1,
+            "institution_name": "测试医院",
+            "institution_type": "医院",
+            "region": "北京",
+            "title": "呼吸科医师",
+            "source_url": "https://example.com/ricu",
+            "source_text_hash": "h-ricu",
+            "raw_text": "RICU 病房讨论记录",
+            "parser_name": "test",
+            "job_category": "临床",
+            "confidence": 0.9,
+            "fetched_at": iso_now(),
+        },
+    ])
+    from app.services.repositories import count_total_matching_jobs
+
+    assert count_total_matching_jobs(engine, "ICU", [1]) == 1
+    # 非 ASCII 关键词仍按子串匹配
+    assert count_total_matching_jobs(engine, "护士", [1]) == 1

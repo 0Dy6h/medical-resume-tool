@@ -185,3 +185,19 @@ def test_doi_and_bare_years_stay_out_of_the_searchable_text():
     assert "10.1/x" not in text
     assert "pub-1" not in text
     assert "队列研究" in text
+
+
+def test_benefits_clause_is_not_a_gap():
+    """岗位待遇条款不计入缺口（2026-09 试用：#97 多出一条永远无法满足的 unmet）。"""
+    profile = profile_of(
+        skills=[{"id": "s1", "name": "熟练使用 SPSS 进行统计分析"}],
+    )
+    job = {
+        "institution_name": "某医院",
+        "title": "研究助理",
+        "raw_text": "岗位要求：熟悉数据分析。 岗位待遇 根据医院相关规定执行，具体待遇面议。",
+    }
+    _evidence, gaps = match_profile_to_job(profile, job)
+    assert not any("待遇" in g["requirement"] for g in gaps)
+    # 真实要求仍然评估（该要求被统计技能命中，应出现在证据里）
+    assert any("数据" in e["requirement"] for e in _evidence)

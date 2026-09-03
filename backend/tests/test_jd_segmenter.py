@@ -102,3 +102,38 @@ def test_empty_text_reports_a_warning_not_a_crash():
     result = segment_requirements("")
     assert result.requirements == []
     assert result.warnings
+
+
+def test_image_table_heading_fragment_is_not_a_requirement():
+    """图片表格型公告（浙大二院）：条件表是 PNG，正文只剩标题碎片。
+
+    "一、 岗位及条件 二、报名方式" 必须不产出「岗位及条件 二」这类垃圾条款
+    （2026-09 真实抓取中曾作为 unmet 要求出现在列表与详情里）。
+    """
+    text = normalize_text(
+        "浙大二院 柯桥院区财务科因工作需要，现面向社会招聘劳务派遣工作人员。"
+        " 一、 岗位及条件 二 、报名方式 简历投递："
+    )
+    reqs = segment_requirements(text).requirements
+    assert all("岗位及条件" not in r for r in reqs), reqs
+
+
+def test_benefits_clauses_are_classified():
+    """待遇/薪酬类条款不是履历可举证的要求（2026-09 试用：#97/#346 混入硬性要求）。"""
+    from app.services.matching.segment import is_benefits_clause
+
+    assert is_benefits_clause("岗位待遇 根据浙江大学医学院附属第二医院相关规定执行，具体待遇面议")
+    assert is_benefits_clause("引进待遇 根据引进人才的类别，高层次人才享受相应的工资和福利待遇")
+    assert is_benefits_clause("思政特岗教授 享受相应专业技术职务的工资和福利待遇，同时享受人才津贴")
+    assert is_benefits_clause("薪酬福利按国家和学校有关规定执行")
+
+
+def test_benefits_classification_keeps_real_requirements():
+    from app.services.matching.segment import is_benefits_clause
+
+    # 学历标记优先：带学历的条款必须留给学位门
+    assert not is_benefits_clause("硕士及以上学历，享受相应待遇")
+    # 含需求提示词的条款不得因尾部提待遇而被误杀
+    assert not is_benefits_clause("具有三年以上临床护理工作经验者优先，待遇从优")
+    assert not is_benefits_clause("具有执业医师资格证书")
+    assert not is_benefits_clause("熟悉临床试验流程及 GCP 法规")

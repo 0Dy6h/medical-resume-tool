@@ -766,7 +766,11 @@ def has_matching_jobs_last_30d(
     institution_ids: list[int],
     now: str | None = None,
 ) -> bool:
-    """Check if any matching job was fetched in the last 30 days."""
+    """Check if any matching job was fetched in the last 30 days.
+
+    SQL LIKE 粗筛后做与 ``find_new_jobs_for_subscription`` 相同的 ASCII 词边界
+    精筛（B2 语义：ICU 不得命中 RICU），保证告警比率与扫描口径一致。
+    """
     if not institution_ids:
         return False
     from datetime import datetime, timedelta, timezone
@@ -777,17 +781,16 @@ def has_matching_jobs_last_30d(
     placeholders = ",".join("?" for _ in institution_ids)
     like = f"%{keyword}%"
     with connect(engine) as conn:
-        row = conn.execute(
+        rows = conn.execute(
             f"""
-            SELECT COUNT(*) AS count FROM jobs
+            SELECT title, institution_name, raw_text FROM jobs
             WHERE institution_id IN ({placeholders})
               AND fetched_at >= ?
               AND (title LIKE ? OR raw_text LIKE ? OR institution_name LIKE ?)
-            LIMIT 1
             """,
             [*institution_ids, threshold_iso, like, like, like],
-        ).fetchone()
-    return int(row["count"]) > 0
+        ).fetchall()
+    return bool(refine_keyword_hits([dict(r) for r in rows], keyword))
 
 
 def count_total_matching_jobs(
@@ -795,21 +798,24 @@ def count_total_matching_jobs(
     keyword: str,
     institution_ids: list[int],
 ) -> int:
-    """Count total jobs matching keyword + institutions (for broad-keyword check)."""
+    """Count total jobs matching keyword + institutions (for broad-keyword check).
+
+    ASCII 关键词做词边界精筛（与扫描口径一致，避免 RICU 计入 ICU 导致宽词误报）。
+    """
     if not institution_ids:
         return 0
     placeholders = ",".join("?" for _ in institution_ids)
     like = f"%{keyword}%"
     with connect(engine) as conn:
-        row = conn.execute(
+        rows = conn.execute(
             f"""
-            SELECT COUNT(*) AS count FROM jobs
+            SELECT title, institution_name, raw_text FROM jobs
             WHERE institution_id IN ({placeholders})
               AND (title LIKE ? OR raw_text LIKE ? OR institution_name LIKE ?)
             """,
             [*institution_ids, like, like, like],
-        ).fetchone()
-    return int(row["count"])
+        ).fetchall()
+    return len(refine_keyword_hits([dict(r) for r in rows], keyword))
 
 
 def count_total_jobs_in_institutions(engine: DatabaseEngine, institution_ids: list[int]) -> int:

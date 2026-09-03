@@ -19,6 +19,12 @@ from app.services.http_client import build_crawl_client
 
 _LISTING_SELECTOR = "div.main li"
 
+# 文章页 meta 行（作者：/审核：/来源：/发布时间：2026-07-27/阅读次数：…），
+# 位于标题与正文之间，混入正文会污染 requirements 与匹配输入。
+_META_LINE = re.compile(
+    r"^(?:作者|审核|编辑|来源|发布时间|发布日期|阅读次数|点击数|字号|打印|分享)\s*[:：]"
+)
+
 
 def extract_article_links(html: str, base_url: str) -> list[dict[str, str]]:
     """从列表页提取公告链接和日期。"""
@@ -79,6 +85,8 @@ def extract_job_from_article(html: str, source_url: str, institution: dict[str, 
             started = True
             continue
         if started:
+            if _META_LINE.match(line):
+                continue
             if any(kw in line for kw in ["报名方式", "简历投递", "联系电话", "联系方式"]):
                 break
             body_lines.append(line)

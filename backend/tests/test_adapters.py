@@ -45,6 +45,10 @@ class TestZ2HospitalAdapter:
         assert "招聘" in job.title or "超声" in job.title
         assert job.source_url == "https://www.z2hospital.com/contents/611/24424.html"
         assert job.confidence > 0
+        # 文章页 meta 样板（作者/审核/来源/发布时间/阅读次数）不得混入正文
+        for marker in ("作者：", "审核：", "编辑：", "来源：", "发布时间：", "阅读次数："):
+            assert marker not in (job.requirements or "")
+            assert marker not in (job.raw_text or "")
 
     def test_extract_job_from_detailed_article(self):
         from app.services.adapters.z2hospital import extract_job_from_article

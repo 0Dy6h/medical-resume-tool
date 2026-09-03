@@ -25,7 +25,7 @@ from app.services.classifier import normalize_text
 #: Section headings that open a requirement block.
 REQUIREMENT_HEADINGS = (
     "招聘条件", "招聘基本条件", "基本条件", "任职条件", "任职要求",
-    "应聘条件", "报考条件", "岗位要求", "岗位条件", "资格条件",
+    "应聘条件", "报考条件", "岗位要求", "岗位条件", "岗位及条件", "资格条件",
     "招聘对象和条件", "报名条件",
 )
 
@@ -187,6 +187,40 @@ def is_eligibility_clause(clause: str) -> bool:
     if any(marker in clause for marker in _DEGREE_MARKERS):
         return False
     return any(marker in clause for marker in _ELIGIBILITY_MARKERS)
+
+
+#: Strong markers of a compensation/benefits statement (岗位待遇/薪酬福利…).
+#: Like eligibility clauses these say nothing the structured profile can prove,
+#: so counting them as unmet gaps only inflates "满足 X/Y 项" with rows the user
+#: can never satisfy.
+_BENEFITS_MARKERS = ("待遇", "薪酬", "薪资", "工资", "福利", "面议", "津贴", "五险一金")
+
+#: Clause-openings that are compensation sections even when the rest of the
+#: sentence contains no other signal ("岗位待遇 根据…面议").
+_BENEFITS_OPENINGS = ("待遇", "薪酬", "薪资", "工资", "福利", "岗位待遇", "相关待遇",
+                      "引进待遇", "薪酬福利", "福利待遇", "工资福利")
+
+
+def is_benefits_clause(clause: str) -> bool:
+    """True when a clause describes compensation/benefits, not a requirement.
+
+    Conservative placement mirrors :func:`is_eligibility_clause`: applied in the
+    matching layer (``resume``), never inside segmentation, and degree-bearing
+    clauses always win so the arithmetic gate keeps seeing them.  A benefits
+    marker alone is not enough — real requirements like "享受相应待遇" after a
+    skill clause stay matchable — so a bare marker only counts when the clause
+    opens with a compensation word or carries no requirement cue at all, or
+    several compensation markers co-occur (工资+福利+津贴 leaves no doubt).
+    """
+    if any(marker in clause for marker in _DEGREE_MARKERS):
+        return False
+    if clause.startswith(_BENEFITS_OPENINGS):
+        return True
+    if sum(1 for marker in _BENEFITS_MARKERS if marker in clause) >= 2:
+        return True
+    if _has_requirement_cue(clause):
+        return False
+    return any(marker in clause for marker in _BENEFITS_MARKERS)
 
 
 def _requirement_block(text: str) -> tuple[str, bool]:
