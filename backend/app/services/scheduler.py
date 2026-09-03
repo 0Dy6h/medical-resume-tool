@@ -21,6 +21,7 @@ from app.services.crawler import (
 from app.services.database import DatabaseEngine
 from app.services.repositories import (
     create_crawl_run,
+    list_crawl_runs,
     list_institutions,
     scan_subscriptions,
 )
@@ -47,6 +48,7 @@ class DailyScheduler:
         clock: Clock | None = None,
         auto_crawl: bool = True,
         crawl_delay: float = 1.0,
+        catch_up: bool = True,
     ) -> None:
         self._engine = engine
         self._hour = hour
@@ -55,6 +57,7 @@ class DailyScheduler:
         self._clock: Clock = clock or _default_clock
         self._auto_crawl = auto_crawl
         self._crawl_delay = crawl_delay
+        self._catch_up = catch_up
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
 
@@ -119,6 +122,38 @@ class DailyScheduler:
         finally:
             release_crawl_slot()
 
+    def maybe_catch_up(self) -> dict[str, Any] | None:
+        """启动补跑：服务进程错过今日时钟点（晚于 09:00 启动、机器休眠、
+        部署重启）时，若最近 24 小时内没有任何 auto 抓取记录，则立即补跑
+        一轮维护循环——否则「每日自动抓取」在进程不常驻的机器上形同虚设。
+
+        独立于 enabled（那是线程闸门）；auto_crawl 关闭时无抓取可补，直接跳过。
+        """
+        if not self._catch_up or not self._auto_crawl:
+            return None
+        if self._recent_auto_run_exists():
+            return None
+        logger.info("调度补跑：最近 24 小时内无自动抓取记录，启动即执行一轮维护循环")
+        return self.run_cycle_once()
+
+    def _recent_auto_run_exists(self) -> bool:
+        cutoff = self._clock() - timedelta(hours=24)
+        for run in list_crawl_runs(self._engine, limit=50):
+            if run.get("trigger") != "auto":
+                continue
+            started = run.get("started_at")
+            if not started:
+                continue
+            try:
+                started_dt = datetime.fromisoformat(str(started))
+            except ValueError:
+                continue
+            if started_dt.tzinfo is None:
+                started_dt = started_dt.replace(tzinfo=timezone.utc)
+            if started_dt >= cutoff:
+                return True
+        return False
+
     def _next_wait_seconds(self) -> float:
         now = self._clock()
         target = now.replace(hour=self._hour, minute=self._minute, second=0, microsecond=0)
@@ -127,6 +162,11 @@ class DailyScheduler:
         return (target - now).total_seconds()
 
     def _loop(self) -> None:
+        try:
+            self.maybe_catch_up()
+        except Exception:
+            # 补跑失败不影响定时循环本身；异常留痕，不允许静默吞掉。
+            logger.exception("调度补跑执行失败")
         while not self._stop.is_set():
             wait = self._next_wait_seconds()
             if self._stop.wait(timeout=wait):

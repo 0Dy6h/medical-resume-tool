@@ -42,6 +42,15 @@ _MAX_GATE_LEN = 30
 #: "…及以上" / "…以上" / "…（含）以上" — the degree it follows is the floor.
 _OR_ABOVE = re.compile(r"(大专|专科|高职|本科|学士|硕士|研究生|博士)(?:研究生)?\s*(?:（?\s*含\s*）?)?\s*(?:及|或)?\s*以上")
 
+#: Degree mentions that do NOT state a floor the applicant must already satisfy:
+#: 博士点/硕士点 are institutional provisions, and 优先 marks preference rather
+#: than requirement ("博士优先" accepts a strong 硕士).  Stripped before floor
+#: detection so compound clauses with passing mentions stay with fuzzy matching.
+_NON_FLOOR_CONTEXT = re.compile(
+    r"(?:博士|硕士)(?:点|后流动站)"
+    r"|(?:大专|专科|高职|本科|学士|硕士|研究生|博士)(?:研究生)?[^，。；\n]{0,8}?优先"
+)
+
 _LEVEL_NAMES = {1: "大专", 2: "本科", 3: "硕士", 4: "博士"}
 
 
@@ -85,6 +94,17 @@ def required_degree_level(requirement: str) -> int | None:
     return min(mentioned) if mentioned else None
 
 
+def hard_degree_floor(requirement: str) -> int | None:
+    """The degree level a clause categorically demands, or None.
+
+    Strips preference/institutional mentions (:data:`_NON_FLOOR_CONTEXT`) before
+    looking for a degree, so "博士优先" and "博士点" clauses stay out of the gate
+    even though :func:`required_degree_level` would see a degree in them.
+    """
+    cleaned = _NON_FLOOR_CONTEXT.sub("", requirement)
+    return required_degree_level(cleaned)
+
+
 def highest_profile_degree(education: list[dict]) -> tuple[int, str] | None:
     """The applicant's highest degree as (level, field_id), or None.
 
@@ -110,13 +130,34 @@ def evaluate_degree_gate(requirement: str, education: list[dict]) -> DegreeGateR
     Returns None when the requirement is not a degree requirement (so the caller
     falls back to fuzzy matching).
     """
-    required = required_degree_level(requirement)
-    if required is None or not is_degree_requirement(requirement):
-        return None
+    # 「优先」择优与「博士点」机构提及不构成学历底线；先剥离再判定，否则
+    # "具有博士学位者优先" 会因含「学位」二字被当成纯学历条款误伤。
+    stripped = _NON_FLOOR_CONTEXT.sub("", requirement)
+    if stripped != requirement:
+        floor = required_degree_level(stripped)
+        if floor is None:
+            return None
+        # 只做「低于即阻断」的算术判定；达到底线的复合条款仍归模糊匹配，
+        # 其余方面（论文、能力）的证据不被门槛吞掉。
+        return _compare_levels(floor, education, allow_unknown=False)
 
+    required = required_degree_level(requirement)
+    if required is None:
+        return None
+    if is_degree_requirement(requirement):
+        return _compare_levels(required, education, allow_unknown=True)
+    # Compound clause (degree named alongside other competencies): a floor the
+    # profile already fails is decided arithmetically — fuzzy scoring against a
+    # 博士 clause would otherwise surface as ordinary, non-blocking gap noise.
+    return _compare_levels(required, education, allow_unknown=False)
+
+
+def _compare_levels(required: int, education: list[dict], allow_unknown: bool) -> DegreeGateResult | None:
     highest = highest_profile_degree(education)
     required_name = _LEVEL_NAMES.get(required, "相应")
     if highest is None:
+        if not allow_unknown:
+            return None
         return DegreeGateResult(
             outcome="unknown",
             required_level=required,
@@ -128,6 +169,10 @@ def evaluate_degree_gate(requirement: str, education: list[dict]) -> DegreeGateR
     profile_level, field_id = highest
     profile_name = _LEVEL_NAMES.get(profile_level, "现有")
     if profile_level >= required:
+        if not allow_unknown:
+            # Met compound floors still go to fuzzy matching so the clause's
+            # other facets (skills, outputs) can produce their own evidence.
+            return None
         return DegreeGateResult(
             outcome="met",
             required_level=required,

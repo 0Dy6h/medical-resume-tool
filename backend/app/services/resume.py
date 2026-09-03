@@ -7,7 +7,7 @@ from app.schemas import PROFILE_COLLECTION_NAMES, Profile
 from app.services.classifier import normalize_text
 from app.services.matching.gates import DegreeGateResult, evaluate_degree_gate
 from app.services.matching.scorer import best_matches, strength_band
-from app.services.matching.segment import segment_requirements
+from app.services.matching.segment import is_eligibility_clause, segment_requirements
 from app.services.repositories import get_profile
 
 if TYPE_CHECKING:
@@ -127,6 +127,12 @@ def match_profile_to_job(profile: Profile, job: dict[str, Any]) -> tuple[list[di
     evidence: list[dict[str, Any]] = []
     gaps: list[dict[str, Any]] = []
     for requirement in requirements:
+        # Eligibility clauses (nationality, age, political status, health…)
+        # state who may apply at all; the profile has no comparable facts, so
+        # they would always render as red "不满足" noise.  They stay visible in
+        # the job's raw announcement text and are the applicant's to confirm.
+        if is_eligibility_clause(requirement):
+            continue
         gate = evaluate_degree_gate(requirement, education)
         if gate is not None:
             _apply_degree_gate(requirement, gate, evidence, gaps)

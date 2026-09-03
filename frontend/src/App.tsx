@@ -146,7 +146,7 @@ export default function App() {
             {active === "jobs" && <JobsPage onNavigate={(page) => setActive(page as PageId)} />}
             {active === "analytics" && <AnalyticsPage onNavigate={(page) => setActive(page as PageId)} />}
             {active === "profile" && <ProfilePage />}
-            {active === "resume" && <ResumePage />}
+            {active === "resume" && <ResumePage onNavigate={(page) => setActive(page as PageId)} />}
             {active === "crawl" && <CrawlPage />}
           </div>
         </div>

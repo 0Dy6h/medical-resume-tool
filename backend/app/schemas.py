@@ -536,22 +536,6 @@ ExportFormat = Literal["docx", "pdf"]
 ExportMode = Literal["application", "diagnostic"]
 
 
-# ── JD Structuring (P0-3) ────────────────────────────────────────────────
-
-class JDRequirement(BaseModel):
-    """Structured job requirement extracted by LLM."""
-    category: str = ""
-    requirement: str = ""
-    must_have: bool = True
-
-
-class StructuredJDOut(BaseModel):
-    """LLM-structured job description output."""
-    job_title: str = ""
-    requirements: list[JDRequirement] = Field(default_factory=list)
-    summary: str = ""
-
-
 # ── Subscriptions (PRD 4.1) ──────────────────────────────────────────
 
 

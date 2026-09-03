@@ -24,14 +24,23 @@ const JOB_STATUS_OPTIONS = [
 export type MatchLabel =
   | { kind: "none" }
   | { kind: "blocking" }
-  | { kind: "ok"; text: string; percent: number };
+  | { kind: "ok"; text: string; title?: string; percent: number };
 
 export function computeMatchLabel(match: JobMatch | null | undefined): MatchLabel {
   if (!match) return { kind: "none" };
   if (match.blocking_gap) return { kind: "blocking" };
+  if (match.total === 0) {
+    // P0-1：无可履历可比要求（纯资格条款或未解析出要求）时，
+    // "满足 0/0 项" 是噪音；公告原文才是判定依据。
+    return { kind: "ok", text: "以公告原文为准", percent: 0 };
+  }
+  // 列表列宽 ~108px，「满足 X/Y 项硬性要求」放不下会被 td 硬裁；
+  // 显示短文案，完整语义放悬停提示。
+  const full = `满足 ${match.met}/${match.total} 项硬性要求`;
   return {
     kind: "ok",
-    text: `满足 ${match.met}/${match.total} 项硬性要求`,
+    text: `满足 ${match.met}/${match.total} 项`,
+    title: full,
     percent: match.degree_percent,
   };
 }
@@ -102,6 +111,9 @@ export function JobsPage({ onNavigate }: { onNavigate: (page: string) => void })
   const [generatingDraft, setGeneratingDraft] = useState(false);
   const [isDesktop, setIsDesktop] = useState(true);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  // 真实视图为空时探测演示数据：断网首启/真实源全挂时，库里的 fixture 样本
+  // 会被默认「真实数据」筛选藏住，用户会误以为岗位库是空的。
+  const [fixtureAvailable, setFixtureAvailable] = useState(false);
   const triggerRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
@@ -132,6 +144,20 @@ export function JobsPage({ onNavigate }: { onNavigate: (page: string) => void })
       setJobs(payload.items);
       setTotal(payload.total);
       setPage(targetPage);
+      if (
+        trust === "real" &&
+        payload.total === 0 &&
+        !keyword && !category && !region && !institutionType && !education
+      ) {
+        try {
+          const probe = await api.jobs({ trust: "fixture", limit: 1 });
+          setFixtureAvailable(probe.total > 0);
+        } catch {
+          setFixtureAvailable(false);
+        }
+      } else {
+        setFixtureAvailable(false);
+      }
       const plan = planDetailSync(detail?.id ?? null, payload.items);
       if (plan.clear) {
         setDetail(null);
@@ -357,6 +383,14 @@ export function JobsPage({ onNavigate }: { onNavigate: (page: string) => void })
               <tr>
                 <td colSpan={7} className="loading-line">
                   未找到匹配岗位
+                  {trust === "real" && fixtureAvailable && (
+                    <div className="fixture-hint">
+                      库中有内置演示数据，但被「真实数据」筛选隐藏。{" "}
+                      <button className="text-button" onClick={() => setTrust("fixture")}>
+                        切换到演示数据
+                      </button>
+                    </div>
+                  )}
                 </td>
               </tr>
             ) : (
@@ -394,7 +428,7 @@ export function JobsPage({ onNavigate }: { onNavigate: (page: string) => void })
                     {matchLabel.kind === "ok" && (
                       <div className="match-cell">
                         <div className="match-bar-track"><span className="match-bar-fill" style={{ width: `${matchLabel.percent}%` }} /></div>
-                        <span className="match-text">{matchLabel.text}</span>
+                        <span className="match-text" title={matchLabel.title}>{matchLabel.text}</span>
                       </div>
                     )}
                   </td>

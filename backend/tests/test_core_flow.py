@@ -1174,6 +1174,64 @@ def test_total_mismatch_returns_422_and_blocks_draft_creation(tmp_path, monkeypa
     assert payload["gaps"] == []
 
 
+def test_blocking_degree_gap_blocks_draft_even_with_partial_match(tmp_path, monkeypatch):
+    """硬性学历不符必须阻断草稿生成——即使其他要求有匹配证据。
+    列表页 blocking_gap 红标与生成 422 用的同一判定，不能各说各话。"""
+    monkeypatch.setenv("CRAWL_DELAY_SECONDS", "0")
+    client = make_client(tmp_path)
+    auth = auth_headers(client)
+
+    async def crawl_controlled_jobs(institution):  # noqa: ANN001
+        return [
+            ParsedJob(
+                title="课题组研究助理",
+                department="课题组",
+                location="北京",
+                education="博士",
+                profession="基础医学",
+                job_category="科研",
+                responsibilities="开展课题研究。",
+                requirements="具有博士学历；熟悉SPSS统计分析。",
+                posted_at=None,
+                deadline=None,
+                source_url="fixture://degree-block-job",
+                source_text_hash="degree-block-hash",
+                raw_text="课题组研究助理 任职要求：具有博士学历；熟悉SPSS统计分析。",
+                tags=["科研"],
+                extraction_evidence={},
+                fetched_at="2026-06-10T00:00:00+00:00",
+                parser_name="test-parser",
+                confidence=0.9,
+            ),
+        ]
+
+    monkeypatch.setattr(crawler_module, "crawl_institution", crawl_controlled_jobs)
+    crawl_and_wait(client, [1])
+    jobs = client.get("/api/jobs").json()["items"]
+    job = next(j for j in jobs if j["source_url"] == "fixture://degree-block-job")
+
+    # 硕士档案：SPSS 有匹配证据，但博士门槛 not_met
+    client.put(
+        "/api/profile",
+        json={
+            "basics": {"name": "硕士求职者"},
+            "education": [{"id": "edu-1", "school": "某大学", "degree": "硕士", "major": "公共卫生"}],
+            "skills": [{"id": "skill-1", "name": "熟练使用 SPSS 进行统计分析"}],
+        },
+        headers=auth,
+    )
+
+    # 列表页匹配元数据先给出阻断信号
+    listing = client.get("/api/jobs", params={"keyword": "研究助理"}, headers=auth).json()["items"]
+    target = next(j for j in listing if j["id"] == job["id"])
+    assert target["match"]["blocking_gap"] is True
+
+    # 生成被 422 拦截，与列表信号一致
+    resp = client.post("/api/resume-drafts", json={"job_id": job["id"]}, headers=auth)
+    assert resp.status_code == 422
+    assert "差距较大" in resp.json()["detail"]
+
+
 def test_resume_draft_history_list_filter_isolation_and_status(tmp_path):
     """PRD 4.4: draft version management — list, filter, isolate, status."""
     client = make_client(tmp_path)

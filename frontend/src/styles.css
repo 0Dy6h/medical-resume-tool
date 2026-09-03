@@ -1020,16 +1020,16 @@ textarea {
   height: 100%;
   border-radius: 3px;
   background: linear-gradient(90deg, var(--green), var(--blue));
-  width: 100%;
-  transform: scaleX(0);
-  transform-origin: left;
-  transition: transform var(--dur-slow) var(--ease-out);
 }
 
 .match-text {
   font-size: 12px;
   color: var(--muted);
-  white-space: nowrap;
+  /* 列宽 ~126px 放不下「满足 X/Y 项硬性要求」，nowrap 会被硬裁掉尾部；
+     换行 + balance 让它断成两行完整显示。 */
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-wrap: balance;
   font-variant-numeric: tabular-nums;
 }
 
@@ -1238,10 +1238,6 @@ pre {
   display: block;
   height: 100%;
   background: linear-gradient(90deg, var(--green), var(--blue));
-  width: 100%;
-  transform: scaleX(0);
-  transform-origin: left;
-  transition: transform var(--dur-slow) var(--ease-out);
 }
 
 .bar-count {
@@ -1849,10 +1845,6 @@ pre {
   height: 100%;
   border-radius: 3px;
   background: var(--green);
-  width: 100%;
-  transform: scaleX(0);
-  transform-origin: left;
-  transition: transform var(--dur-slow) var(--ease-out);
 }
 
 .loading-line {
@@ -1860,6 +1852,11 @@ pre {
   text-align: center;
   color: var(--muted);
   font-size: 13px;
+}
+
+.fixture-hint {
+  margin-top: 8px;
+  color: var(--ink-secondary);
 }
 
 /* Sidebar footer: user info + logout */
@@ -2859,4 +2856,31 @@ pre {
   gap: 4px;
   border: 1px solid var(--amber);
   background: var(--amber-soft);
+}
+
+/* === P0-2: 生成被硬性门槛阻断时的常驻提示（toast 之外的页面内出口） === */
+.block-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border: 1px solid #fecaca;
+  background: #fef2f2;
+  border-radius: 12px;
+  padding: 14px 18px;
+}
+
+.block-notice-body {
+  display: grid;
+  gap: 4px;
+  color: #991b1b;
+}
+
+.block-notice-body p {
+  margin: 0;
+  font-size: 14px;
+}
+
+.block-notice .small {
+  color: #b45309;
 }

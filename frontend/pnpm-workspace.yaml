@@ -1,2 +1,6 @@
 allowBuilds:
   esbuild: true
+# 本机 pnpm 的 run 前依赖检查在非交互终端下误报需要清空重建 node_modules
+# （ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY），曾把运行中的 Vite 干掉。
+# 依赖同步改为显式 `pnpm install`，不自动触发。
+verifyDepsBeforeRun: false

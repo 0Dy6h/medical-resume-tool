@@ -19,6 +19,7 @@
 
 ## 项目文档
 
+- 用户上手指南（5 分钟）：`docs/user-guide.md`
 - 架构说明：`docs/architecture.md`
 - 领域词汇与核心概念：`CONTEXT.md`
 - 运维/启动手册（本地开发）：`docs/runbook.md`
@@ -27,6 +28,7 @@
 - 当前交接：`docs/handoffs/2026-09-02-workspace-and-startup.md`
 - 架构决策记录：`docs/adr/index.md`
 - 历史线上部署记录：`docs/deployments/tencent-cloud-cvm-2026-06-18/README.md`
+- 历史整改/验证报告（2026-06，已过时仅存档）：`docs/archive/`
 
 ## 后端
 

@@ -37,8 +37,19 @@ describe("computeMatchLabel", () => {
     const result = computeMatchLabel({ met: 3, total: 5, degree_percent: 60, blocking_gap: false });
     expect(result.kind).toBe("ok");
     if (result.kind === "ok") {
-      expect(result.text).toContain("满足 3/5");
+      // 列表列宽有限：短文案保证单行完整显示，完整语义放悬停提示。
+      expect(result.text).toBe("满足 3/5 项");
+      expect(result.title).toBe("满足 3/5 项硬性要求");
       expect(result.percent).toBe(60);
+    }
+  });
+
+  it("P0-1: total 为 0 时显示「以公告原文为准」而非 0/0", () => {
+    const result = computeMatchLabel({ met: 0, total: 0, degree_percent: 0, blocking_gap: false });
+    expect(result.kind).toBe("ok");
+    if (result.kind === "ok") {
+      expect(result.text).toBe("以公告原文为准");
+      expect(result.percent).toBe(0);
     }
   });
 });

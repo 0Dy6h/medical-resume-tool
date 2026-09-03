@@ -90,6 +90,21 @@ _STOP_SUBHEADINGS = (
     "联系", "咨询", "监督", "其他事项", "有关事项", "注意事项",
 )
 
+#: Strong markers of an application-eligibility clause (国籍/年龄/政治面貌/
+#: 健康状况…).  These state who may apply at all, not what the job needs from
+#: a resume; the structured profile carries no comparable facts for them, so
+#: counting them as unmet gaps only drowns the real match signal (P0-1).
+_ELIGIBILITY_MARKERS = (
+    "国籍", "宪法", "年龄", "周岁", "政治面貌", "中共党员", "预备党员",
+    "品行", "遵纪守法", "违法", "犯罪", "身体条件", "身心健康", "健康状况",
+    "计划生育", "回避", "户籍", "生源",
+)
+
+#: Degree markers win over eligibility markers: a combined clause like
+#: "硕士及以上学历，年龄不超过35周岁" must reach the degree gate, which is the
+#: only component able to evaluate it arithmetically.
+_DEGREE_MARKERS = ("学历", "学位", "大专", "专科", "本科", "硕士", "博士", "研究生")
+
 _MIN_LEN = 4
 _MAX_LEN = 140
 _MAX_REQUIREMENTS = 15
@@ -159,6 +174,19 @@ def _looks_like_employer_blurb(clause: str) -> bool:
 
 def _has_requirement_cue(clause: str) -> bool:
     return any(cue in clause for cue in _REQUIREMENT_CUES)
+
+
+def is_eligibility_clause(clause: str) -> bool:
+    """True when a clause states application eligibility, not a resume-matchable
+    requirement.
+
+    Deliberately conservative: degree-bearing clauses are never eligibility (the
+    degree gate evaluates them), so "硕士及以上学历，年龄不超过35周岁" still
+    reaches the matcher while "具有中华人民共和国国籍" does not reach the gap list.
+    """
+    if any(marker in clause for marker in _DEGREE_MARKERS):
+        return False
+    return any(marker in clause for marker in _ELIGIBILITY_MARKERS)
 
 
 def _requirement_block(text: str) -> tuple[str, bool]:

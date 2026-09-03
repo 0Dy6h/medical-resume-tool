@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { flattenReviewItems, computeDraftStatus, reviewTone, filterExportSections, exportBlock, readPendingDraftId, PENDING_DRAFT_KEY, isUnlinkedReviewItem, shouldResetDraftOnJobChange, reviewCompletion, unlinkedExportCount } from "./ResumePage";
+import { flattenReviewItems, computeDraftStatus, reviewTone, filterExportSections, exportBlock, readPendingDraftId, PENDING_DRAFT_KEY, isUnlinkedReviewItem, shouldResetDraftOnJobChange, reviewCompletion, unlinkedExportCount, mismatchNoticeFromError } from "./ResumePage";
 import type { ResumeSection } from "../types";
 
 describe("shouldResetDraftOnJobChange — 切岗时草稿上下文必须跟随选择器", () => {
@@ -301,5 +301,18 @@ describe("isUnlinkedReviewItem — 无档案证据关联判定", () => {
 
   it("标题为「投递前需补充确认」的区块排除 → false", () => {
     expect(isUnlinkedReviewItem({ text: "待确认项", sectionTitle: "投递前需补充确认" }, "custom")).toBe(false);
+  });
+});
+
+
+describe("mismatchNoticeFromError — P0-2 阻断错误转常驻提示", () => {
+  it("学历硬阻断的 422 文案 → 返回提示（非 toast 死胡同）", () => {
+    const msg = "您的档案与该岗位的要求差距较大，建议关注其他更匹配的职位";
+    expect(mismatchNoticeFromError(msg)).toBe(msg);
+  });
+
+  it("普通错误（网络/未填履历）→ 返回 null，维持 toast 行为", () => {
+    expect(mismatchNoticeFromError("请先填写或导入履历内容")).toBeNull();
+    expect(mismatchNoticeFromError("Request failed: 500")).toBeNull();
   });
 });

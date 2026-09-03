@@ -158,6 +158,15 @@ export function shouldResetDraftOnJobChange(
   return draft.job_id !== nextJobId;
 }
 
+/**
+ * P0-2：学历等硬性门槛被 422 阻断时，toast 几秒即逝、页面停留在空态死胡同。
+ * 识别阻断类错误文案，转为页面内常驻提示 + 「去岗位库」出口；
+ * 非阻断错误（网络等）返回 null，维持 toast 行为。
+ */
+export function mismatchNoticeFromError(message: string): string | null {
+  return message.includes("差距较大") ? message : null;
+}
+
 // ── Review card colours (matching PRD 4.4 prototype) ────────────────
 
 const TONE_STYLES: Record<"green" | "yellow" | "red", { bg: string; border: string; color: string; label: string }> = {
@@ -174,13 +183,14 @@ const DECISION_LABEL: Record<string, string> = {
 
 // ── Component ────────────────────────────────────────────────────────
 
-export function ResumePage() {
+export function ResumePage({ onNavigate }: { onNavigate?: (page: string) => void }) {
   const toast = useToast();
   const [jobs, setJobs] = useState<Job[]>([]);
   const [jobId, setJobId] = useState<number | "">("");
   const [draft, setDraft] = useState<ResumeDraft | null>(null);
   const [loading, setLoading] = useState(false);
   const [jobsLoading, setJobsLoading] = useState(true);
+  const [blockNotice, setBlockNotice] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [exportConfirm, setExportConfirm] = useState<{
@@ -242,6 +252,7 @@ export function ResumePage() {
   }, []);
 
   useEffect(() => {
+    setBlockNotice(null);
     void refreshDraftHistory(jobId);
   }, [jobId]);
 
@@ -251,13 +262,19 @@ export function ResumePage() {
     try {
       const newDraft = await api.createResumeDraft(Number(jobId));
       setDraft(newDraft);
+      setBlockNotice(null);
       setReviewMode(false);
       setCurrentIndex(0);
       setEditing(false);
       void refreshDraftHistory(jobId);
       toast.success("已生成简历草稿");
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "生成失败");
+      const message = error instanceof Error ? error.message : "生成失败";
+      // P0-2：硬性门槛阻断不再是几秒即逝的 toast + 死胡同空态，
+      // 转为页面内常驻提示并给出「去岗位库」出口。
+      const notice = mismatchNoticeFromError(message);
+      setBlockNotice(notice);
+      if (!notice) toast.error(message);
     } finally {
       setLoading(false);
     }
@@ -532,6 +549,19 @@ export function ResumePage() {
           </button>
         </div>
       </section>
+
+      {blockNotice && (
+        <section className="panel block-notice" role="alert">
+          <div className="block-notice-body">
+            <strong>无法为该岗位生成简历草稿</strong>
+            <p>{blockNotice}</p>
+            <span className="small">学历等硬性条件由公告原文判定；匹配度列只统计履历可比的要求，可据此挑选岗位。</span>
+          </div>
+          <button className="secondary-button" onClick={() => onNavigate?.("jobs")}>
+            去岗位库按学历筛选
+          </button>
+        </section>
+      )}
 
       {draftHistory.length > 0 && (
         <section className="panel">

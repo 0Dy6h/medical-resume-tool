@@ -159,9 +159,10 @@ def test_auto_cycle_creates_auto_run_then_scans_subscriptions(tmp_path):
 
 
 def _backdate_iso(days: float) -> str:
+    """相对注入时钟取历史时间点：真实墙时已越过 FIXED_TIME，按 now 回溯会让断言变成时间炸弹。"""
     from datetime import timedelta
 
-    return (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    return (FIXED_TIME - timedelta(days=days)).isoformat()
 
 
 def test_auto_cycle_skips_crawl_when_slot_busy(tmp_path):
@@ -244,3 +245,69 @@ def test_init_db_migrates_crawl_runs_trigger_column(tmp_path):
         assert "trigger" in cols
         row = migrated.execute("SELECT trigger FROM crawl_runs").fetchone()
         assert row["trigger"] == "manual"
+
+
+# ── 启动补跑（P0-3）：进程错过时钟点时按 24h 内有无 auto 抓取决定是否补跑 ──
+
+
+def _insert_auto_run(engine, started_iso: str) -> None:
+    with connect(engine) as conn:
+        conn.execute(
+            """
+            INSERT INTO crawl_runs (status, started_at, completed_at, institution_ids,
+                                    success_count, failure_count, error_summary, trigger)
+            VALUES ('completed', ?, ?, '[1]', 1, 0, '[]', 'auto')
+            """,
+            (started_iso, started_iso),
+        )
+        conn.commit()
+
+
+def test_startup_catch_up_runs_when_no_recent_auto_run(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'catchup_fresh.db'}")
+    init_db(engine)
+    scheduler = DailyScheduler(
+        engine, hour=9, minute=0, enabled=False,
+        clock=lambda: FIXED_TIME, auto_crawl=True, crawl_delay=0,
+    )
+    result = scheduler.maybe_catch_up()
+    assert result is not None and result["crawl"] is not None
+    auto_runs = [r for r in list_crawl_runs(engine) if r["trigger"] == "auto"]
+    assert len(auto_runs) == 1
+
+
+def test_startup_catch_up_skips_when_auto_run_within_24h(tmp_path):
+    """昨天 09:00 已自动抓取过 → 今天 09:00 重启不重跑（避免重复抓取）。"""
+    engine = create_engine(f"sqlite:///{tmp_path / 'catchup_recent.db'}")
+    init_db(engine)
+    _insert_auto_run(engine, "2026-08-31T09:00:00+00:00")  # FIXED_TIME 前 24h 整
+    scheduler = DailyScheduler(
+        engine, hour=9, minute=0, enabled=False,
+        clock=lambda: FIXED_TIME, auto_crawl=True, crawl_delay=0,
+    )
+    assert scheduler.maybe_catch_up() is None
+    assert len([r for r in list_crawl_runs(engine) if r["trigger"] == "auto"]) == 1
+
+
+def test_startup_catch_up_runs_when_last_auto_run_older_than_24h(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'catchup_stale.db'}")
+    init_db(engine)
+    _insert_auto_run(engine, "2026-08-30T08:00:00+00:00")  # 距 FIXED_TIME 超 24h
+    scheduler = DailyScheduler(
+        engine, hour=9, minute=0, enabled=False,
+        clock=lambda: FIXED_TIME, auto_crawl=True, crawl_delay=0,
+    )
+    result = scheduler.maybe_catch_up()
+    assert result is not None
+    assert len([r for r in list_crawl_runs(engine) if r["trigger"] == "auto"]) == 2
+
+
+def test_startup_catch_up_disabled_with_auto_crawl_off(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'catchup_off.db'}")
+    init_db(engine)
+    scheduler = DailyScheduler(
+        engine, hour=9, minute=0, enabled=False,
+        clock=lambda: FIXED_TIME, auto_crawl=False,
+    )
+    assert scheduler.maybe_catch_up() is None
+    assert list_crawl_runs(engine) == []

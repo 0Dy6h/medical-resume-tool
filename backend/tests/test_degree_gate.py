@@ -4,6 +4,7 @@ import pytest
 
 from app.services.matching.gates import (
     evaluate_degree_gate,
+    hard_degree_floor,
     highest_profile_degree,
     is_degree_requirement,
     required_degree_level,
@@ -90,3 +91,47 @@ def test_met_degree_requirement_becomes_traceable_evidence():
     degree_evidence = [item for item in evidence if item.get("gate") == "degree"]
     assert degree_evidence
     assert degree_evidence[0]["profile_field_id"] == "ed1"
+
+
+# ── 复合条款中的硬学历底线（博士后岗"……博士，具备……能力"类）───────────
+
+
+POSTDOC_CLAUSE = "基础医学、生物学或药学博士，具备英文论文写作能力和独立科研能力"
+
+
+def test_compound_clause_with_hard_floor_blocks_below_floor():
+    """条款超长且无"以上/学历"标记时 is_degree_requirement 为 False，但其中的
+    博士仍是硬性底线：低于该底线的档案必须收到阻断性 gap，而不是普通缺口。"""
+    gate = evaluate_degree_gate(POSTDOC_CLAUSE, [{"id": "e", "degree": "硕士"}])
+    assert gate is not None
+    assert gate.outcome == "not_met"
+
+    from app.schemas import Profile
+    from app.services.resume import match_profile_to_job, summarize_match
+
+    profile = Profile.from_legacy_dict({"education": [{"id": "ed1", "school": "某大学", "degree": "硕士", "major": "公共卫生"}]})
+    job = {"institution_name": "某所", "title": "基础医学博士后", "raw_text": f"任职要求：{POSTDOC_CLAUSE}。"}
+    _evidence, gaps = match_profile_to_job(profile, job)
+    summary = summarize_match(_evidence, gaps)
+    assert summary["blocking_gap"] is True
+
+
+def test_compound_clause_met_floor_stays_with_fuzzy_matching():
+    """达到复合条款底线时门槛返回 None：其余方面（论文、能力）仍由模糊匹配
+    产生证据，门槛不得抢走整条条款。"""
+    gate = evaluate_degree_gate(POSTDOC_CLAUSE, [{"id": "e", "degree": "博士"}])
+    assert gate is None
+
+
+def test_priority_and_institutional_mentions_are_not_floors():
+    """「博士优先」是择优不是门槛；「博士点」是机构平台不是学历要求。"""
+    edu = [{"id": "e", "degree": "本科"}]
+    assert evaluate_degree_gate("具有博士学位者优先，发表过SCI论文", edu) is None
+    assert evaluate_degree_gate("参与博士点建设申报工作", edu) is None
+    assert hard_degree_floor("博士优先") is None
+    assert hard_degree_floor(POSTDOC_CLAUSE) == 4
+
+
+def test_compound_floor_without_education_stays_unjudged():
+    """复合条款 + 档案无学历信息：不阻断（不确定的事交给用户确认）。"""
+    assert evaluate_degree_gate(POSTDOC_CLAUSE, []) is None

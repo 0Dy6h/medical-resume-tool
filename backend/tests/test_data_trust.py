@@ -91,6 +91,30 @@ def test_trust_slices_return_only_their_kind(tmp_path):
     assert {item["institution_id"] for item in disabled} == {8}
 
 
+def test_trust_placeholder_and_fixture_exclude_disabled_institutions(tmp_path):
+    """禁用机构的占位/演示历史在内存分类中降级为 disabled（classify_job_trust
+    的优先级），SQL 切片必须同一口径：placeholder/fixture 切片不得混入 disabled
+    行，否则筛选计数与行内可信度标签互相矛盾。"""
+    client = make_client(tmp_path)
+    _seed_jobs(client)
+    engine = client.app.state.engine
+    # 机构 8 已禁用：占位与 fixture 历史数据各一条
+    upsert_job(engine, _institution(client, 8), _parsed(8, "https://example.com/old-ph", "generic-list-v1"))
+    upsert_job(engine, _institution(client, 8), _parsed(8, "fixture://institution/8/job/1", "fixture-v1"))
+
+    placeholder = client.get("/api/jobs", params={"trust": "placeholder"}).json()
+    assert {item["institution_id"] for item in placeholder["items"]} == {7}
+    assert placeholder["total"] == len(placeholder["items"])
+
+    fixture = client.get("/api/jobs", params={"trust": "fixture"}).json()
+    assert {item["institution_id"] for item in fixture["items"]} == {1}
+    assert fixture["total"] == len(fixture["items"])
+
+    # 历史记录仍可经 disabled 切片访问
+    disabled = client.get("/api/jobs", params={"trust": "disabled"}).json()["items"]
+    assert {item["institution_id"] for item in disabled} == {8}
+
+
 def test_fresh_days_filters_stale_jobs(tmp_path):
     client = make_client(tmp_path)
     engine = client.app.state.engine

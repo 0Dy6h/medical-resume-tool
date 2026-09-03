@@ -18,7 +18,6 @@ from app.schemas import (
     ExportMode,
     ExportFormat,
     InstitutionOut,
-    JDRequirement,
     JobDetailOut,
     JobListOut,
     JobStatusOut,
@@ -35,7 +34,6 @@ from app.schemas import (
     ResumeDraftOut,
     ResumeDraftSummaryOut,
     ResumeDraftUpdate,
-    StructuredJDOut,
     SubscriptionCreate,
     SubscriptionOut,
     SubscriptionScanOut,
@@ -51,7 +49,6 @@ from app.services.exporter import (
     export_docx,
     export_pdf,
 )
-from app.services.jd_structurer import structure_jd_from_job
 from app.services.profile_import import ProfileImportError, build_profile_contract, extract_profile_text
 from app.services.repositories import (
     count_new_jobs_for_subscription,
@@ -391,19 +388,6 @@ def create_app(database_url: str | None = None) -> FastAPI:
         delete_job_status(engine, user["id"], job_id)
         return Response(status_code=204)
 
-    @app.get("/api/jobs/{job_id}/structure", response_model=StructuredJDOut)
-    def job_structure(
-        job_id: int,
-        engine: Annotated[DatabaseEngine, Depends(get_engine)],
-        user: Annotated[dict | None, Depends(get_optional_user)] = None,
-    ) -> StructuredJDOut:
-        """Extract structured requirements from a job description using LLM."""
-        try:
-            job = get_job(engine, job_id, user_id=user["id"] if user else None)
-        except KeyError:
-            raise HTTPException(status_code=404, detail="岗位不存在") from None
-        return structure_jd_from_job(job)
-
     @app.get("/api/analytics/summary", response_model=AnalyticsSummary)
     def summary(
         engine: Annotated[DatabaseEngine, Depends(get_engine)],
@@ -505,7 +489,10 @@ def create_app(database_url: str | None = None) -> FastAPI:
         if profile.is_empty:
             raise HTTPException(status_code=400, detail="请先填写或导入履历内容")
         evidence, gaps = match_profile_to_job(profile, job)
-        if is_total_mismatch(evidence, gaps):
+        # 422: hard degree floors the profile fails (blocking gaps) block even
+        # when other requirements match; a job whose evaluable requirements are
+        # ALL unmet also blocks as a total mismatch.
+        if is_total_mismatch(evidence, gaps) or any(bool(gap.get("blocking")) for gap in gaps):
             raise HTTPException(
                 status_code=422,
                 detail="您的档案与该岗位的要求差距较大，建议关注其他更匹配的职位",

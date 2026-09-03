@@ -348,9 +348,13 @@ def build_jobs_where_clause(filters: dict[str, Any]) -> tuple[str, list[Any]]:
     elif trust == "placeholder":
         clauses.append(f"parser_name IN ({','.join('?' * len(PLACEHOLDER_PARSERS))})")
         params.extend(sorted(PLACEHOLDER_PARSERS))
+        # 已禁用机构的历史记录在内存分类中降级为 disabled（classify_job_trust 的
+        # 优先级），SQL 切片必须同一口径，否则筛选计数与行内可信度标签互相矛盾。
+        clauses.append("institution_id IN (SELECT id FROM institutions WHERE enabled = 1)")
     elif trust == "fixture":
         clauses.append(f"parser_name IN ({','.join('?' * len(FIXTURE_PARSERS))})")
         params.extend(sorted(FIXTURE_PARSERS))
+        clauses.append("institution_id IN (SELECT id FROM institutions WHERE enabled = 1)")
     elif trust == "disabled":
         clauses.append("institution_id IN (SELECT id FROM institutions WHERE enabled = 0)")
     fresh_days = filters.get("fresh_days")
