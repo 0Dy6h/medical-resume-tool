@@ -275,6 +275,34 @@ class TestCheckProfileOverlaps:
         assert result["overlap"] is False
         assert result["items"] == []
 
+    def test_id_less_items_all_flagged(self):
+        # API payloads may omit row ids entirely; every participant of an
+        # overlapping pair must still be reported, not just the first one.
+        profile = {
+            "education": [
+                {"school": "A大学", "start": "2018", "end": "2022"},
+                {"school": "B大学", "start": "2020", "end": "2022"},
+            ],
+            "experiences": [],
+        }
+        result = check_profile_overlaps(profile)
+        assert result["overlap"] is True
+        assert len(result["items"]) == 2
+
+    def test_two_id_less_pairs_all_flagged(self):
+        profile = {
+            "education": [
+                {"school": "A大学", "start": "2018", "end": "2022"},
+                {"school": "B大学", "start": "2020", "end": "2022"},
+                {"school": "C大学", "start": "2010", "end": "2014"},
+                {"school": "D大学", "start": "2012", "end": "2016"},
+            ],
+            "experiences": [],
+        }
+        result = check_profile_overlaps(profile)
+        assert result["overlap"] is True
+        assert len(result["items"]) == 4
+
     def test_cross_category_not_checked(self):
         profile = {
             "education": [

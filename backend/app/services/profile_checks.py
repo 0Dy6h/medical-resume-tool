@@ -157,10 +157,11 @@ def check_profile_overlaps(
 
     Returns ``{"overlap": bool, "items": [...]}`` where ``items`` lists every
     item that participates in at least one overlapping pair (deduplicated by
-    id).  The list is empty when ``overlap`` is ``False``.
+    id, falling back to object identity for id-less items).  The list is
+    empty when ``overlap`` is ``False``.
     """
     flagged: list[dict[str, Any]] = []
-    seen_ids: set[str] = set()
+    seen_keys: set[Any] = set()
 
     for collection in ("education", "experiences"):
         items = profile_data.get(collection)
@@ -178,9 +179,11 @@ def check_profile_overlaps(
                 ratio = _overlap_ratio(a_start, a_end, b_start, b_end)
                 if ratio is not None and ratio >= OVERLAP_THRESHOLD:
                     for item in (a, b):
-                        item_id = str(item.get("id", ""))
-                        if item_id and item_id not in seen_ids:
-                            seen_ids.add(item_id)
+                        key: Any = item.get("id")
+                        if not key:
+                            key = ("obj", id(item))
+                        if key not in seen_keys:
+                            seen_keys.add(key)
                             flagged.append(item)
 
     return {"overlap": bool(flagged), "items": flagged}
