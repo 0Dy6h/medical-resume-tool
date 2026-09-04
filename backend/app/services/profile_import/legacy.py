@@ -90,7 +90,9 @@ def extract_profile_text(filename: str, content: bytes) -> ProfileTextExtraction
     if extension == ".pdf":
         return extract_pdf_text(content)
     if extension in TEXT_EXTENSIONS:
-        return extract_plain_text(content)
+        # markdown 标题标记在行式管线里没有语义，还会让「# 姓名」因前缀
+        # 不满足纯中文姓名检测而被静默丢弃（docx 标题段落无此前缀，行为一致）。
+        return extract_plain_text(content, strip_markdown_headings=extension != ".txt")
     return extract_image_text(content, filename or extension)
 
 
@@ -148,16 +150,26 @@ def extract_pdf_text(content: bytes) -> ProfileTextExtraction:
     return ProfileTextExtraction(lines=lines, warnings=_dedupe(warnings))
 
 
-def extract_plain_text(content: bytes) -> ProfileTextExtraction:
+_MARKDOWN_HEADING = re.compile(r"^#{1,6}\s+")
+
+
+def extract_plain_text(content: bytes, *, strip_markdown_headings: bool = False) -> ProfileTextExtraction:
     warnings: list[str] = []
-    for encoding in ["utf-8-sig", "utf-8", "gb18030", "gbk", "big5"]:
-        try:
-            return ProfileTextExtraction(content.decode(encoding).splitlines())
-        except UnicodeDecodeError:
-            continue
-    text = content.decode("utf-8", errors="replace")
-    warnings.append("文本编码无法完全识别，已尽量保留可读内容")
-    return ProfileTextExtraction(text.splitlines(), warnings)
+
+    def _decode() -> tuple[list[str], bool]:
+        for encoding in ["utf-8-sig", "utf-8", "gb18030", "gbk", "big5"]:
+            try:
+                return content.decode(encoding).splitlines(), True
+            except UnicodeDecodeError:
+                continue
+        return content.decode("utf-8", errors="replace").splitlines(), False
+
+    lines, decoded = _decode()
+    if strip_markdown_headings:
+        lines = [_MARKDOWN_HEADING.sub("", line) for line in lines]
+    if not decoded:
+        warnings.append("文本编码无法完全识别，已尽量保留可读内容")
+    return ProfileTextExtraction(lines, warnings)
 
 
 def extract_image_text(content: bytes, filename: str) -> ProfileTextExtraction:

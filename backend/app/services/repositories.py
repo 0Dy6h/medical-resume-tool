@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -882,6 +883,12 @@ def list_all_subscriptions(engine: DatabaseEngine) -> list[dict[str, Any]]:
     return items
 
 
+#: 抓取完成钩子与用户手动扫描可能并发：check-then-insert（读 last_pushed_at →
+#: 建通知 → 推进检查点）跨多个连接，无进程级互斥时会为同一批新岗位重复建通知
+#: （2026-09 试用实测：同秒双通知）。本地 MVP 单进程部署，进程级锁即可串行化。
+_SCAN_LOCK = threading.Lock()
+
+
 def scan_subscriptions(
     engine: DatabaseEngine,
     now: datetime,
@@ -894,9 +901,20 @@ def scan_subscriptions(
     - If new jobs are found, writes a notification (with a short summary) to the
       subscription owner and advances last_pushed_at to *now*.
     - Does NOT change last_checked_at or new_count (those are read-checkpoint concepts).
+    - Serialized by ``_SCAN_LOCK``: the crawl-completion hook and a user-triggered
+      scan must not interleave, or both push the same new jobs.
 
     Returns a summary dict with scanned/pushed/notified counts.
     """
+    with _SCAN_LOCK:
+        return _scan_subscriptions_locked(engine, now, user_id)
+
+
+def _scan_subscriptions_locked(
+    engine: DatabaseEngine,
+    now: datetime,
+    user_id: int | None = None,
+) -> dict[str, Any]:
     now_str = now.isoformat()
     if user_id is not None:
         subs = list_subscriptions(engine, user_id)

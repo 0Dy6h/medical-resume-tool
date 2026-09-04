@@ -275,3 +275,36 @@ def test_import_endpoint_rejects_corrupt_docx(tmp_path):
         headers=auth,
     )
     assert response.status_code == 400
+
+
+def test_import_endpoint_markdown_name_heading_maps_to_basics(tmp_path):
+    """markdown「# 姓名」标题必须进 basics.name，而不是被静默丢弃。
+
+    docx 标题段落（无 # 前缀）一直能映射姓名；md 行式提取保留了 # 前缀，
+    纯中文姓名检测因此失败（2026-09 试用发现）。
+    """
+    client = make_client(tmp_path)
+    auth = auth_headers(client)
+    markdown = "# 王五\n电话：13500000005\n\n## 教育经历\n2021-09 至 2024-06 某医科大学 临床医学 硕士\n"
+    response = client.post(
+        "/api/profile/import",
+        files={"file": ("resume.md", markdown.encode("utf-8"), "text/markdown")},
+        headers=auth,
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["basics"]["name"] == "王五"
+    assert payload["basics"]["phone"] == "13500000005"
+    assert payload["education"][0]["major"] == "临床医学"
+
+
+def test_extract_plain_text_strips_markdown_headings_only_for_md():
+    from app.services.profile_import.legacy import extract_plain_text
+
+    content = "# 王五\n## 教育经历\n正文".encode("utf-8")
+    md = extract_plain_text(content, strip_markdown_headings=True)
+    assert md.lines == ["王五", "教育经历", "正文"]
+    # txt 不剥离：# 是字面内容
+    txt = extract_plain_text(content)
+    assert txt.lines[0] == "# 王五"

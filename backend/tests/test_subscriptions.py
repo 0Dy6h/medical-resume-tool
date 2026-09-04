@@ -1178,3 +1178,63 @@ def test_count_total_matching_jobs_respects_ascii_word_boundary(tmp_path):
     assert count_total_matching_jobs(engine, "ICU", [1]) == 1
     # 非 ASCII 关键词仍按子串匹配
     assert count_total_matching_jobs(engine, "护士", [1]) == 1
+
+
+def test_concurrent_scans_do_not_duplicate_notifications(tmp_path):
+    """抓取完成钩子与用户手动扫描并发时，同一订阅对同一批新岗位只推一条通知。
+
+    2026-09 试用实测：手动重抓完成钩子扫描与端点扫描同秒交错，同一订阅
+    生成两条重复通知（check-then-insert 跨连接非原子）。
+    """
+    client = make_client(tmp_path)
+    register_user(client, "carol")
+    engine = client.app.state.engine
+    # 先建订阅再种岗位：岗位 fetched_at 必须晚于订阅检查点才会被视为"新"
+    resp = client.post(
+        "/api/subscriptions", json={"name": "并发订阅", "keyword": "ICU"}, headers=auth_headers_carol(client)
+    )
+    assert resp.status_code == 201
+    seed_jobs(engine, [
+        {
+            "institution_id": 1,
+            "institution_name": "测试医院",
+            "institution_type": "医院",
+            "region": "北京",
+            "title": "ICU 护士招聘",
+            "source_url": "https://example.com/icu-concurrent",
+            "source_text_hash": "h-icu-concurrent",
+            "raw_text": "重症监护室 ICU 护士招聘启事",
+            "parser_name": "test",
+            "job_category": "护理",
+            "confidence": 0.9,
+            "fetched_at": iso_now(),
+        },
+    ])
+
+    from concurrent.futures import ThreadPoolExecutor
+    from datetime import datetime, timezone
+
+    from app.services.database import connect
+    from app.services.repositories import scan_subscriptions
+
+    with connect(engine) as conn:
+        user_id = conn.execute("SELECT id FROM users WHERE username = 'carol'").fetchone()[0]
+
+    def run_scan() -> dict:
+        return scan_subscriptions(engine, datetime.now(timezone.utc), user_id=user_id)
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        results = list(pool.map(lambda _: run_scan(), range(8)))
+
+    # 并发扫描全部串行执行：只有第一次真正推送，其余应为 0 新岗位
+    assert sum(r["pushed"] for r in results) == 1
+    from app.services.repositories import list_notifications
+
+    notes = list_notifications(engine, user_id, limit=50)
+    assert len(notes) == 1, [n["id"] for n in notes]
+
+
+def auth_headers_carol(client: TestClient) -> dict[str, str]:
+    response = client.post("/api/auth/login", json={"username": "carol", "password": "secret123"})
+    assert response.status_code == 200, response.text
+    return {"Authorization": f"Bearer {response.json()['token']}"}
