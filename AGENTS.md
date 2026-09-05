@@ -59,6 +59,7 @@ pnpm dev
 - `backend/app/services/scheduler.py` - daily maintenance loop (auto-crawl then subscription scan) plus startup catch-up (`maybe_catch_up`: if no `trigger='auto'` crawl ran in the last 24h, one runs immediately at startup). The singleflight lock `try_acquire_crawl_slot` is defined in `crawler.py`; the scheduler only borrows it.
 - `backend/app/services/http_client.py` - outbound fetch client: TLS enforced, private/loopback/cloud-metadata targets blocked, 10MB response cap.
 - `backend/app/services/auth.py` - stdlib-only auth (scrypt passwords, self-signed HMAC session tokens; secret from `AUTH_SECRET` or persisted `data/.auth_secret`).
+- `backend/app/services/adapters/adapter_base.py` - shared listing→article→attachment crawl skeleton (client setup, per-article fetch, xlsx download, error handling). A new site adapter only supplies `extract_links` + `parse_article`; do not copy the main loop.
 - `backend/app/services/adapters/nfyy.py` - 南方医院 announcement parser (real site adapter).
 - `backend/app/services/adapters/z2hospital.py` - 浙大二院 listing+article parser.
 - `backend/app/services/adapters/chinacdc.py` - 中疾控 listing+department notice parser.
@@ -78,6 +79,7 @@ pnpm dev
 - `backend/fixtures/njmu/` - 南京医科大学 fixture HTML.
 - `backend/fixtures/hrbmu/` - 哈尔滨医科大学 fixture HTML.
 - `backend/fixtures/bjmu/` - 北京大学医学部 fixture HTML.
+- `backend/tests/` - pytest suite, per-module `test_*.py` files plus `fixtures/`; `conftest.py` puts `backend/` on sys.path and sets `SUBSCRIPTION_SCAN_ENABLED=false` so tests never fire notification scans.
 - `frontend/src/App.tsx` - frontend shell and navigation.
 - `frontend/src/pages/` - workbench pages (tests live alongside as `*.test.ts`).
 - `backend/scripts/` - offline utilities run from `backend/`: `build_idf.py` (IDF table), `export_preview.py`, `measure_jobs_layout.py`.
