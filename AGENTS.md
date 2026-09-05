@@ -4,7 +4,7 @@
 
 This repo is a local MVP for Chinese medical job intelligence and truthful resume tailoring. It has a FastAPI/SQLite backend and a React/Vite frontend.
 
-Read `CONTEXT.md` first for the domain vocabulary (trust levels A1, job identity A4, truthful-resume constraints, crawl singleflight). Those concepts each have one authoritative implementation location listed there — do not reinvent them elsewhere. Decision history lives in `docs/adr/`; runbook in `docs/runbook.md`; architecture overview in `docs/architecture.md`; end-user guide in `docs/user-guide.md`; dated execution plans in `docs/plans/`; deployment guide in `docs/deploy.md`; outdated top-level reports are parked in `docs/archive/`.
+Read `CONTEXT.md` first for the domain vocabulary (trust levels A1, job identity A4, truthful-resume constraints, crawl singleflight). Those concepts each have one authoritative implementation location listed there — do not reinvent them elsewhere. Decision history lives in `docs/adr/`; runbook in `docs/runbook.md`; architecture overview in `docs/architecture.md`; end-user guide in `docs/user-guide.md`; dated execution plans in `docs/plans/`; deployment guide in `docs/deploy.md` (root `deploy.sh` is the Linux one-click deploy script it documents); product research in `docs/product/`, dated trial/review reports in `docs/reviews/`, past deployment records in `docs/deployments/`; outdated top-level reports are parked in `docs/archive/`.
 
 ## Core Boundaries
 
@@ -50,6 +50,8 @@ pnpm dev
 ## File Map
 
 - `backend/app/main.py` - FastAPI routes and app factory.
+- `backend/app/config.py` - centralized runtime config (crawler intervals, paths, toggles) as a dataclass read from env.
+- `backend/app/schemas.py` - Pydantic request/response models shared by the routes.
 - `backend/app/services/database.py` - SQLite schema and seed initialization.
 - `backend/app/services/seeds.py` - 30 institution seed records.
 - `backend/app/services/crawler.py` - fixture and generic crawler/parser, adapter dispatch.
@@ -81,6 +83,8 @@ pnpm dev
 - `backend/fixtures/bjmu/` - 北京大学医学部 fixture HTML.
 - `backend/tests/` - pytest suite, per-module `test_*.py` files plus `fixtures/`; `conftest.py` puts `backend/` on sys.path and sets `SUBSCRIPTION_SCAN_ENABLED=false` so tests never fire notification scans.
 - `frontend/src/App.tsx` - frontend shell and navigation.
+- `frontend/src/lib/` - shared pure logic (api client, format, import merge, match analysis, resume evidence, subscription/workflow utils), each with co-located `*.test.ts`.
+- `frontend/src/components/` - shared UI components (AuthContext, Toast, DetailDrawer, NotificationBell, StatusPill, …), tests alongside as `*.test.ts`.
 - `frontend/src/pages/` - workbench pages (tests live alongside as `*.test.ts`).
 - `backend/scripts/` - offline utilities run from `backend/`: `build_idf.py` (IDF table), `export_preview.py`, `measure_jobs_layout.py`.
 - `medical-job-prd/` - self-contained product PRD (static HTML, no build step).
