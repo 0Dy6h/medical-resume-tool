@@ -308,6 +308,14 @@ h3 {
   gap: 8px;
 }
 
+/* 全局表单规则给 select 设了 width:100%，在 flex 行里会把兄弟按钮挤到
+   min-content（分析页「市场洞察/数据质量/刷新/报告」曾逐字竖排换行），
+   flex 行内的 select 恢复内容宽度。 */
+.button-row select {
+  width: auto;
+  flex: 0 0 auto;
+}
+
 .primary-button,
 .icon-text-button,
 .text-button,
@@ -452,6 +460,7 @@ button:disabled {
   color: var(--muted);
   font-size: 13px;
   cursor: pointer;
+  white-space: nowrap;
   transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
 }
 
