@@ -549,13 +549,20 @@ def create_app(database_url: str | None = None) -> FastAPI:
         except KeyError:
             raise HTTPException(status_code=404, detail="简历草稿不存在") from None
 
+        export_draft = _draft_for_export(draft)
+
+        # 422: empty content — enforced regardless of override, and before the
+        # review guard: an empty draft never reaches "reviewed", so the review
+        # guard would 409 with the contradictory "还有 0 项待确认".
+        export_items = [item for section in export_draft["sections"] for item in section.get("items", [])]
+        if not export_items:
+            raise HTTPException(status_code=422, detail="导出内容为空，请至少保留一项内容后再导出")
+
         # 409: unreviewed draft — blocked unless the caller passes override.
         if _compute_draft_status(draft) != "reviewed" and not override:
             items = [item for section in draft.get("sections", []) for item in section.get("items", [])]
             pending = sum(1 for item in items if item.get("decision") not in ("adopt", "edit", "remove"))
             raise HTTPException(status_code=409, detail=f"草稿尚未审阅完成，还有 {pending} 项待确认")
-
-        export_draft = _draft_for_export(draft)
 
         # 409: application 模式下存在未绑定档案证据的内容 —— 需显式确认后才允许导出。
         # 诊断模式不受此限制：无证据条目在附录中被明确标注，而非静默进入投递版。
@@ -569,11 +576,6 @@ def create_app(database_url: str | None = None) -> FastAPI:
                         "请逐项确认内容真实无误后再导出"
                     ),
                 )
-
-        # 422: empty content — enforced regardless of override.
-        export_items = [item for section in export_draft["sections"] for item in section.get("items", [])]
-        if not export_items:
-            raise HTTPException(status_code=422, detail="导出内容为空，请至少保留一项内容后再导出")
 
         include_appendix = mode == "diagnostic"
         ext = "docx" if format == "docx" else "pdf"

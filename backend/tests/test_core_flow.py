@@ -1027,6 +1027,34 @@ def test_export_empty_draft_returns_422(tmp_path):
     assert "为空" in resp.json()["detail"]
 
 
+def test_export_empty_sections_422_even_unreviewed(tmp_path):
+    """空草稿永远到不了 reviewed，导出必须报 422 为空。
+
+    回归：PUT sections=[] 后无 override 导出曾命中审阅守卫，
+    返回自相矛盾的 409「草稿尚未审阅完成，还有 0 项待确认」。
+    """
+    client = make_client(tmp_path)
+    auth = auth_headers(client)
+    crawl_and_wait(client, [1])
+    job = client.get("/api/jobs", params={"keyword": "科研"}).json()["items"][0]
+    profile_payload = {
+        "basics": {"name": "空导出"},
+        "skills": [{"id": "skill-1", "name": "SPSS"}, {"id": "skill-2", "name": "英语阅读能力良好"}],
+    }
+    client.put("/api/profile", json=profile_payload, headers=auth)
+    draft = client.post("/api/resume-drafts", json={"job_id": job["id"]}, headers=auth).json()
+
+    client.put(f"/api/resume-drafts/{draft['id']}", json={"sections": []}, headers=auth)
+
+    resp = client.post(
+        f"/api/resume-drafts/{draft['id']}/export",
+        params={"format": "docx"},
+        headers=auth,
+    )
+    assert resp.status_code == 422
+    assert "为空" in resp.json()["detail"]
+
+
 def test_diagnostic_export_appendix_contains_evidence_and_gaps(tmp_path):
     """Diagnostic mode appends a match-analysis appendix with evidence and gaps."""
     client = make_client(tmp_path)

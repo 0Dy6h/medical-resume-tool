@@ -130,6 +130,38 @@ def test_basics_extraction_leaves_name_empty_without_signal():
     assert "name" not in contract.basics
 
 
+def test_basics_name_prefers_label_over_title_line():
+    """「姓名 王大力」是强信号，不得让排在前面的标题行「个人简历」抢先冒充姓名。"""
+    lines = [
+        "个人简历",
+        "姓名 王大力",
+        "学校 北京大学 专业 临床医学 学历 本科 2015-09 至 2019-06",
+    ]
+    contract = build_profile_contract(lines, [])
+
+    assert contract.basics["name"] == "王大力"
+
+
+def test_basics_name_skips_resume_title_line_for_positional_fallback():
+    """标题行被排除后，位置启发式才能落到真正的姓名行。"""
+    contract = build_profile_contract(["个人简历", "张三"], [])
+
+    assert contract.basics["name"] == "张三"
+
+
+def test_basics_name_accepts_label_without_colon():
+    contract = build_profile_contract(["姓名 李四明"], [])
+
+    assert contract.basics["name"] == "李四明"
+
+
+def test_basics_name_not_confused_by_label_without_separator():
+    """「姓名」后无分隔符直接连正文时不得截成姓名。"""
+    contract = build_profile_contract(["姓名与身份证不符的情况说明"], [])
+
+    assert "name" not in contract.basics
+
+
 def test_project_block_not_misrouted_to_experience():
     lines = ["2021.01-2023.12 北京某三甲医院 科研项目 负责人"]
     contract = build_profile_contract(lines, [])

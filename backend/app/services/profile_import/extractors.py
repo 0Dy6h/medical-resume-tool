@@ -76,8 +76,14 @@ _SKILL_PREFIX = re.compile(r"^(熟悉|掌握|了解|使用|运用)\s*", re.I)
 
 _PHONE_RE = re.compile(r"1[3-9]\d{9}")
 _EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
-_NAME_LABEL_RE = re.compile(r"(?:姓名|名字|称谓)[:：]\s*(\S{2,4})")
+# 姓名标签要求显式分隔（冒号或空白），且姓名本体为 2-4 个纯汉字——
+# 否则「姓名与身份证不符」这类正文会被截成姓名。
+_NAME_LABEL_RE = re.compile(r"(?:姓名|名字|称谓)[:：\s]\s*([\u4e00-\u9fff]{2,4})(?![\u4e00-\u9fff])")
 _PURE_CJK_RE = re.compile(r"^[\u4e00-\u9fff]{2,4}$")
+# 文档标题行不是姓名（「个人简历」4 字纯汉字会通过位置启发式）。
+_RESUME_TITLE_TEXTS = frozenset(
+    {"个人简历", "简历", "求职简历", "应聘简历", "个人履历", "履历", "个人简介", "个人求职简历"}
+)
 
 _SECTION_HEADING_TEXTS: set[str] = set()
 for _aliases in SECTION_ALIASES.values():
@@ -113,7 +119,7 @@ def build_basics(blocks: list[DocumentBlock]) -> tuple[dict[str, str], set[str]]
     basics: dict[str, str] = {}
     consumed: set[str] = set()
 
-    for index, block in enumerate(blocks):
+    for block in blocks:
         text = block.text
 
         phone_match = _PHONE_RE.search(text)
@@ -126,20 +132,31 @@ def build_basics(blocks: list[DocumentBlock]) -> tuple[dict[str, str], set[str]]
             basics["email"] = email_match.group(0)
             consumed.add(text)
 
-        if "name" not in basics:
+    # 姓名标签是强信号，先扫完全部块；位置启发式只做兜底，
+    # 否则排在前面的标题行会抢先冒充姓名。
+    for block in blocks:
+        if "name" in basics:
+            break
+        for line in block.lines:
+            if not line.text:
+                continue
+            name_match = _NAME_LABEL_RE.search(line.text)
+            if name_match:
+                basics["name"] = name_match.group(1).strip()
+                consumed.add(block.text)
+                break
+
+    if "name" not in basics:
+        for index, block in enumerate(blocks):
+            if index >= 3:
+                break
             for line in block.lines:
-                line_text = line.text
-                if not line_text:
-                    continue
-                name_match = _NAME_LABEL_RE.search(line_text)
-                if name_match:
-                    basics["name"] = name_match.group(1).strip()
-                    consumed.add(text)
+                if line.text and _is_likely_name(line.text):
+                    basics["name"] = line.text.strip()
+                    consumed.add(block.text)
                     break
-                if index < 3 and _is_likely_name(line_text):
-                    basics["name"] = line_text.strip()
-                    consumed.add(text)
-                    break
+            if "name" in basics:
+                break
 
     return basics, consumed
 
@@ -148,7 +165,7 @@ def _is_likely_name(text: str) -> bool:
     stripped = text.strip()
     if not _PURE_CJK_RE.match(stripped):
         return False
-    if stripped in _SECTION_HEADING_TEXTS:
+    if stripped in _SECTION_HEADING_TEXTS or stripped in _RESUME_TITLE_TEXTS:
         return False
     for suffix_list in (_ORG_SUFFIXES, _ROLE_SUFFIXES, _SCHOOL_SUFFIXES):
         if any(suffix in stripped for suffix in suffix_list):
