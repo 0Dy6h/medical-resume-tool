@@ -574,6 +574,8 @@ class ReportCreate(BaseModel):
                 raise ValueError("fresh_days 必须是整数天数")
             if int(fresh_days) < 1:
                 raise ValueError("fresh_days 必须 ≥ 1（与岗位列表接口口径一致）")
+            if int(fresh_days) > 3650:
+                raise ValueError("fresh_days 必须 ≤ 3650（10 年上限，防止时间差溢出）")
         return v
 
 

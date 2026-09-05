@@ -162,6 +162,63 @@ def test_basics_name_not_confused_by_label_without_separator():
     assert "name" not in contract.basics
 
 
+def test_education_labeled_pairs_bind_following_tokens_as_values():
+    """「学校 北京大学」的「学校」是标签不是值——后缀启发式不得把它解析成 school。"""
+    lines = [
+        "教育背景",
+        "学校 北京大学 专业 临床医学 学历 本科 2015-09 至 2019-06",
+    ]
+    contract = build_profile_contract(lines, [])
+
+    assert len(contract.education) == 1
+    education = contract.education[0]
+    assert education["school"] == "北京大学"
+    assert education["major"] == "临床医学"
+    assert education["degree"] == "本科"
+
+
+def test_education_labeled_pairs_with_colons():
+    contract = build_profile_contract(
+        ["教育背景", "学校：北京大学 专业：临床医学 学历：本科 2015-09 至 2019-06"], []
+    )
+
+    education = contract.education[0]
+    assert education["school"] == "北京大学"
+    assert education["major"] == "临床医学"
+    assert education["degree"] == "本科"
+
+
+def test_education_unlabeled_suffix_heuristic_still_works():
+    contract = build_profile_contract(
+        ["教育经历", "2015.09-2019.06 北京大学 临床医学 本科"], []
+    )
+
+    education = contract.education[0]
+    assert education["school"] == "北京大学"
+    assert education["major"] == "临床医学"
+    assert education["degree"] == "本科"
+
+
+def test_experience_labeled_pairs_bind_org_and_role():
+    contract = build_profile_contract(
+        ["工作经历", "单位 北京协和医院 岗位 主治医师 2019-07 至 2024-08"], []
+    )
+
+    experience = contract.experiences[0]
+    assert experience["organization"] == "北京协和医院"
+    assert experience["role"] == "主治医师"
+
+
+def test_experience_labeled_pairs_with_colons():
+    contract = build_profile_contract(
+        ["工作经历", "工作单位：北京协和医院 职位：主治医师 2019-07 至 2024-08"], []
+    )
+
+    experience = contract.experiences[0]
+    assert experience["organization"] == "北京协和医院"
+    assert experience["role"] == "主治医师"
+
+
 def test_project_block_not_misrouted_to_experience():
     lines = ["2021.01-2023.12 北京某三甲医院 科研项目 负责人"]
     contract = build_profile_contract(lines, [])

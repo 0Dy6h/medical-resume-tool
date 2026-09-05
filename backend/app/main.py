@@ -302,7 +302,7 @@ def create_app(database_url: str | None = None) -> FastAPI:
         institution_type: str | None = None,
         tag: str | None = None,
         trust: Annotated[str, Query(pattern="^(real|placeholder|fixture|disabled|all)$")] = "all",
-        fresh_days: Annotated[int | None, Query(ge=1)] = None,
+        fresh_days: Annotated[int | None, Query(ge=1, le=3650)] = None,
         limit: Annotated[int, Query(ge=1, le=500)] = 100,
         offset: Annotated[int, Query(ge=0)] = 0,
     ) -> dict:

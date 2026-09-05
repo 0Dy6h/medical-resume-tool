@@ -347,15 +347,51 @@ def _split_blocks(lines: list[str]) -> list[list[str]]:
     return blocks
 
 
+# 教育/经历行的标签词：既是「标签-值对」的键，也不得被后缀启发式当成值。
+# 「学校」本身以「学校」结尾（在 _SCHOOL_SUFFIXES 中），不排除会解析出 school=「学校」。
+_EDU_LABEL_TOKENS = {"学校", "院校", "毕业院校", "专业", "学历", "学位"}
+_EXP_ORG_LABEL_TOKENS = {"工作单位", "单位", "任职单位"}
+_EXP_ROLE_LABEL_TOKENS = {"岗位", "职位", "职务"}
+_LABEL_VALUE_PREFIX = re.compile(
+    r"^(学校|院校|毕业院校|专业|学历|学位|工作单位|任职单位|单位|岗位|职位|职务)[：:](.+)$"
+)
+
+
+def _expand_label_value_tokens(tokens: list[str]) -> list[str]:
+    """把「学校：北京大学」拆成「学校」「北京大学」两个 token，交给标签-值配对。"""
+    expanded: list[str] = []
+    for token in tokens:
+        match = _LABEL_VALUE_PREFIX.match(token)
+        expanded.extend([match.group(1), match.group(2)] if match else [token])
+    return expanded
+
+
+def _labeled_value(tokens: list[str], labels: set[str]) -> str:
+    """标签（冒号或空白分隔）后紧跟的 token 是值：「学校 北京大学」→ 北京大学。"""
+    for index, token in enumerate(tokens):
+        if token.rstrip("：:") in labels and index + 1 < len(tokens):
+            return tokens[index + 1]
+    return ""
+
+
 def _build_education(block: list[str]) -> dict[str, Any]:
     head, highlights = block[0], block[1:]
     start, end, remaining = _take_date_range(head)
     degree_match = _DEGREE.search(remaining)
     degree = degree_match.group(0) if degree_match else ""
-    tokens = _tokens(remaining)
-    school = _pick_token(tokens, _SCHOOL_SUFFIXES)
-    major = next(
-        (token for token in tokens if token not in {school, degree} and not _DEGREE.fullmatch(token) and 2 <= len(token) <= 20),
+    tokens = _expand_label_value_tokens(_tokens(remaining))
+    school = _labeled_value(tokens, {"学校", "院校", "毕业院校"}) or _pick_token(
+        [token for token in tokens if token.rstrip("：:") not in _EDU_LABEL_TOKENS], _SCHOOL_SUFFIXES
+    )
+    major = _labeled_value(tokens, {"专业"}) or next(
+        (
+            token
+            for token in tokens
+            if token not in {school, degree}
+            and token.rstrip("：:") not in _EDU_LABEL_TOKENS
+            and not _DEGREE.fullmatch(token)
+            and 2 <= len(token) <= 20
+        ),
         "",
     )
     return _entry(school=school, degree=degree, major=major, start=start, end=end, highlights=highlights)
@@ -364,9 +400,14 @@ def _build_education(block: list[str]) -> dict[str, Any]:
 def _build_experience(block: list[str]) -> dict[str, Any]:
     head, highlights = block[0], block[1:]
     start, end, remaining = _take_date_range(head)
-    tokens = _tokens(remaining)
-    organization = _pick_token(tokens, _ORG_SUFFIXES)
-    role = _pick_token([token for token in tokens if token != organization], _ROLE_SUFFIXES)
+    tokens = _expand_label_value_tokens(_tokens(remaining))
+    organization = _labeled_value(tokens, _EXP_ORG_LABEL_TOKENS) or _pick_token(
+        [token for token in tokens if token.rstrip("：:") not in _EXP_ORG_LABEL_TOKENS | _EXP_ROLE_LABEL_TOKENS],
+        _ORG_SUFFIXES,
+    )
+    role = _labeled_value(tokens, _EXP_ROLE_LABEL_TOKENS) or _pick_token(
+        [token for token in tokens if token != organization], _ROLE_SUFFIXES
+    )
     return _entry(organization=organization, role=role, start=start, end=end, highlights=highlights)
 
 

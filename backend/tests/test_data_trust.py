@@ -125,6 +125,18 @@ def test_fresh_days_filters_stale_jobs(tmp_path):
     assert {item["source_url"] for item in items} == {"https://example.com/new-1"}
 
 
+def test_fresh_days_rejects_out_of_range_values(tmp_path):
+    """fresh_days ≥1 且 ≤3650：0/负数/超大值（timedelta 溢出曾 500）一律 422。"""
+    client = make_client(tmp_path)
+
+    for days in ("0", "-3", "9999999999", "3651"):
+        response = client.get("/api/jobs", params={"fresh_days": days})
+        assert response.status_code == 422, f"fresh_days={days} -> {response.status_code}"
+
+    ok = client.get("/api/jobs", params={"fresh_days": "3650"})
+    assert ok.status_code == 200
+
+
 def test_analytics_trust_breakdown_and_filter(tmp_path):
     client = make_client(tmp_path)
     _seed_jobs(client)

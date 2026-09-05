@@ -832,6 +832,8 @@ def test_report_rejects_invalid_filters(tmp_path):
         {"fresh_days": "abc"},
         {"fresh_days": 0},
         {"fresh_days": -3},
+        {"fresh_days": 9999999999},
+        {"fresh_days": 3651},
         {"trust": "bogus_value"},
         {"unknown_key": "x"},
         {"institution_id": "abc"},
