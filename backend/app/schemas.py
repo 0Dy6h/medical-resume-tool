@@ -518,9 +518,63 @@ class ResumeDraftSummaryOut(BaseModel):
     updated_at: str
 
 
+_REPORT_FILTER_KEYS = {
+    "keyword",
+    "institution_id",
+    "region",
+    "job_category",
+    "education",
+    "institution_type",
+    "tag",
+    "trust",
+    "fresh_days",
+}
+_TRUST_FILTER_VALUES = {"real", "placeholder", "fixture", "disabled"}
+
+
+def _is_int_like(value: Any) -> bool:
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, int):
+        return True
+    if isinstance(value, str):
+        try:
+            int(value)
+            return True
+        except ValueError:
+            return False
+    return False
+
+
 class ReportCreate(BaseModel):
     title: str = "医疗岗位市场分析报告"
     filters: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("filters")
+    @classmethod
+    def validate_filters(cls, v: dict[str, Any]) -> dict[str, Any]:
+        """Reject free-form filters before they reach build_jobs_where_clause.
+
+        The SQL builder silently ignores unknown keys and would crash on a
+        non-numeric ``fresh_days`` (``int()``), so an invalid slice must be
+        refused here rather than reported as a full-dataset or 500 report.
+        """
+        unknown = sorted(set(v) - _REPORT_FILTER_KEYS)
+        if unknown:
+            raise ValueError(f"不支持的筛选字段：{', '.join(unknown)}")
+        trust = v.get("trust")
+        if trust is not None and trust not in _TRUST_FILTER_VALUES:
+            raise ValueError("trust 仅支持 real/placeholder/fixture/disabled")
+        institution_id = v.get("institution_id")
+        if institution_id is not None and not _is_int_like(institution_id):
+            raise ValueError("institution_id 必须是机构 ID 整数")
+        fresh_days = v.get("fresh_days")
+        if fresh_days is not None:
+            if not _is_int_like(fresh_days):
+                raise ValueError("fresh_days 必须是整数天数")
+            if int(fresh_days) < 1:
+                raise ValueError("fresh_days 必须 ≥ 1（与岗位列表接口口径一致）")
+        return v
 
 
 class ReportOut(BaseModel):

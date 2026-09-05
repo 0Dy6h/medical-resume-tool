@@ -823,6 +823,36 @@ def test_report_html_escapes_title_and_lines(tmp_path):
     assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html
 
 
+def test_report_rejects_invalid_filters(tmp_path):
+    """Free-form filters must 422, not 500 on int() or silently count all jobs."""
+    client = make_client(tmp_path)
+    crawl_and_wait(client, [1])
+
+    for filters in (
+        {"fresh_days": "abc"},
+        {"fresh_days": 0},
+        {"fresh_days": -3},
+        {"trust": "bogus_value"},
+        {"unknown_key": "x"},
+        {"institution_id": "abc"},
+    ):
+        report = client.post("/api/reports", json={"title": "过滤校验", "filters": filters})
+        assert report.status_code == 422, f"filters={filters} -> {report.status_code}"
+
+
+def test_report_accepts_valid_filters(tmp_path):
+    client = make_client(tmp_path)
+    crawl_and_wait(client, [1])
+
+    report = client.post(
+        "/api/reports",
+        json={"title": "t", "filters": {"trust": "disabled", "fresh_days": "7", "institution_id": "1"}},
+    )
+
+    assert report.status_code == 201
+    assert "岗位样本" in report.json()["markdown"]
+
+
 def test_profile_extended_collections_can_supply_resume_evidence(tmp_path):
     client = make_client(tmp_path)
     auth = auth_headers(client)
