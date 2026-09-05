@@ -127,7 +127,14 @@ def test_crawl_run_triggers_notification(tmp_path):
     assert run.status_code == 201
     _wait_runs(client, run.json()["id"])
 
+    # 爬取钩子在 run 状态写入 completed 之后才执行订阅扫描（main._crawl_then_scan
+    # 的 finally 段），_wait_runs 返回可能落在「completed 已写、扫描未跑」的窗口，
+    # 轮询宽限避免竞态假红（2026-09-05 夜班实测概率性失败）。
+    deadline = time.time() + 5
     items = client.get("/api/notifications", headers=headers).json()
+    while len(items) < 1 and time.time() < deadline:
+        time.sleep(0.05)
+        items = client.get("/api/notifications", headers=headers).json()
     assert len(items) >= 1
     assert items[0]["job_count"] >= 1
 

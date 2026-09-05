@@ -171,3 +171,61 @@ def test_application_export_linked_draft_not_blocked(tmp_path):
         headers=auth,
     )
     assert resp.status_code == 200
+
+
+def test_application_export_blocks_forged_profile_field_id(tmp_path):
+    """伪造 profile_field_id（不存在于当前档案）→ 投递版导出 409 拦截。
+
+    2026-09-05 夜班实测发现：守卫此前只查引用非空，任意非空字符串
+    （如 "999999"）即可伪装成已绑定档案证据进入投递版，违反真实简历红线。
+    """
+    client = make_client(tmp_path)
+    auth = auth_headers(client)
+    draft, _ = _make_draft(client, auth, strip_link=False)
+
+    sections = draft["sections"]
+    forged = 0
+    for section in sections:
+        if section["id"] in {"identity", "target", "gaps"}:
+            continue
+        if str(section.get("title", "")).strip() == "投递前需补充确认":
+            continue
+        for item in section["items"]:
+            if item.get("profile_field_id"):
+                item["profile_field_id"] = "999999-forged"
+                forged += 1
+    assert forged > 0
+    client.put(f"/api/resume-drafts/{draft['id']}", json={"sections": sections}, headers=auth)
+
+    resp = client.post(
+        f"/api/resume-drafts/{draft['id']}/export",
+        params={"format": "docx", "mode": "application"},
+        headers=auth,
+    )
+    assert resp.status_code == 409
+    assert "未关联档案证据" in resp.json()["detail"]
+
+    # 诊断模式不受限：伪造引用条目在附录中标注，供自查
+    diag = client.post(
+        f"/api/resume-drafts/{draft['id']}/export",
+        params={"format": "docx", "mode": "diagnostic"},
+        headers=auth,
+    )
+    assert diag.status_code == 200
+    assert "999999-forged" not in docx_document_xml(diag.content)
+
+
+def test_put_draft_rejects_invalid_decision(tmp_path):
+    """decision 任意字符串（如 "maybe"）→ 422，不再静默入库回显。"""
+    client = make_client(tmp_path)
+    auth = auth_headers(client)
+    draft, _ = _make_draft(client, auth, strip_link=False)
+
+    sections = draft["sections"]
+    for section in sections:
+        for item in section["items"]:
+            item["decision"] = "maybe"
+    resp = client.put(
+        f"/api/resume-drafts/{draft['id']}", json={"sections": sections}, headers=auth
+    )
+    assert resp.status_code == 422

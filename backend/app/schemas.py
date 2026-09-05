@@ -477,8 +477,28 @@ class ResumeDraftCreate(BaseModel):
     job_id: int
 
 
+_VALID_DECISIONS = ("adopt", "edit", "remove")
+
+
 class ResumeDraftUpdate(BaseModel):
     sections: list[dict[str, Any]]
+
+    @field_validator("sections")
+    @classmethod
+    def validate_decisions(cls, v: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """审阅决策只接受 adopt/edit/remove（未决策为缺省）。
+
+        sections 是自由 dict,没有这里的前置校验,任意字符串（如 "maybe"）
+        会被原样入库并回显,审阅生命周期与导出守卫都无法解释它。
+        """
+        for section in v:
+            for item in section.get("items") or []:
+                decision = item.get("decision")
+                if decision is not None and decision not in _VALID_DECISIONS:
+                    raise ValueError(
+                        f"decision 仅支持 {'/'.join(_VALID_DECISIONS)}，收到 {decision!r}"
+                    )
+        return v
 
 
 class JobStatusPayload(BaseModel):

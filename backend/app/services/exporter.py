@@ -340,7 +340,17 @@ _SKIP_SECTION_IDS = {
 _SKIP_SECTION_TITLE = "投递前需补充确认"
 
 
-def collect_unlinked_items(draft: dict[str, Any]) -> list[dict[str, Any]]:
+def collect_unlinked_items(
+    draft: dict[str, Any],
+    valid_field_ids: set[str] | None = None,
+) -> list[dict[str, Any]]:
+    """收集「未绑定档案证据」的草稿条目。
+
+    ``valid_field_ids`` 是当前档案全部合法证据引用（条目自带 id 或位置 id，
+    口径同 ``resume.flatten_profile_facts``）。传入时，引用必须真实存在于
+    当前档案才算已关联——伪造/失效的 ``profile_field_id`` 不能伪装成有证据；
+    不传（None）保持旧口径：非空即已关联。
+    """
     unlinked: list[dict[str, Any]] = []
     for section in draft.get("sections", []):
         if section.get("id") in _SKIP_SECTION_IDS:
@@ -350,7 +360,8 @@ def collect_unlinked_items(draft: dict[str, Any]) -> list[dict[str, Any]]:
         for item in section.get("items", []):
             if item.get("decision") == "remove":
                 continue
-            if str(item.get("profile_field_id") or "").strip():
+            ref = str(item.get("profile_field_id") or "").strip()
+            if ref and (valid_field_ids is None or ref in valid_field_ids):
                 continue
             unlinked.append({"text": item.get("text", "")})
     return unlinked

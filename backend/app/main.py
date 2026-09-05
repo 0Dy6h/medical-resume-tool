@@ -93,6 +93,7 @@ from app.services.resume import (
     PROFILE_COLLECTIONS,
     analyze_job_match,
     attach_job_matches,
+    flatten_profile_facts,
     generate_resume_draft,
     is_total_mismatch,
     match_profile_to_job,
@@ -566,8 +567,13 @@ def create_app(database_url: str | None = None) -> FastAPI:
 
         # 409: application 模式下存在未绑定档案证据的内容 —— 需显式确认后才允许导出。
         # 诊断模式不受此限制：无证据条目在附录中被明确标注，而非静默进入投递版。
+        # 证据引用须真实存在于当前档案（伪造/已失效的 profile_field_id 不算有证据）。
         if mode == "application" and not override:
-            unlinked = collect_unlinked_items(export_draft)
+            profile = get_profile(engine, user["id"])
+            valid_field_ids = {
+                fact["profile_field_id"] for fact in flatten_profile_facts(profile)
+            }
+            unlinked = collect_unlinked_items(export_draft, valid_field_ids)
             if unlinked:
                 raise HTTPException(
                     status_code=409,
