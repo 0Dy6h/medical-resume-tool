@@ -68,6 +68,7 @@ pnpm dev
 - `backend/app/services/adapters/njmu.py` - 南京医科大学 listing+announcement parser.
 - `backend/app/services/adapters/hrbmu.py` - 哈尔滨医科大学 listing+table parser.
 - `backend/app/services/adapters/bjmu.py` - 北京大学医学部 listing+announcement parser.
+- `backend/app/services/adapters/image_table_ocr.py` - runtime OCR for condition tables published as PNG images inside announcements (currently used by z2hospital): merges recognized text back into the article body and re-parses. Honest-degradation chain — missing deps / no tesseract / broken image / empty OCR text all return None and the crawl continues; never raise. Toggle `IMAGE_TABLE_OCR_ENABLED` (default on); tesseract command/languages shared with profile import via `TESSERACT_CMD` / `PROFILE_IMPORT_OCR_LANGUAGES`.
 - `backend/app/services/classifier.py` - rule-based category and tag extraction; still writes the persisted `jobs.requirements` column and job filters (do not change without a data migration).
 - `backend/app/services/keyword_match.py` - subscription keyword semantics: non-ASCII keywords match by substring, pure-ASCII keywords match case-insensitively on word boundaries («ICU» must not hit «RICU»). `refine_keyword_hits` post-filters SQL LIKE results.
 - `backend/app/services/profile_checks.py` - pure profile boundary checks (PRD 4.3): education/experience time-overlap detection (≥50 % of the shorter range, pairs within the same collection only; unparseable dates never warn) and draft-reference counting by exact `profile_field_id`.
@@ -86,8 +87,9 @@ pnpm dev
 - `frontend/src/lib/` - shared pure logic (api client, format, import merge, match analysis, resume evidence, subscription/workflow utils), each with co-located `*.test.ts`.
 - `frontend/src/components/` - shared UI components (AuthContext, Toast, DetailDrawer, NotificationBell, StatusPill, …), tests alongside as `*.test.ts`.
 - `frontend/src/pages/` - workbench pages (tests live alongside as `*.test.ts`).
-- `backend/scripts/` - offline utilities run from `backend/`: `build_idf.py` (IDF table), `export_preview.py`, `measure_jobs_layout.py`.
+- `backend/scripts/` - offline utilities run from `backend/`: `build_idf.py` (IDF table), `export_preview.py`, `measure_jobs_layout.py`, `cleanup_test_accounts.py` (deletes accumulated trial/probe accounts from the db in FK-safe order; dry-run by default, `--apply` auto-backs-up the db file first, only touches accounts matching test naming patterns such as `trial_*` / `verify*` / `smoke_*` unless `--also` names them explicitly).
 - `medical-job-prd/` - self-contained product PRD (static HTML, no build step).
+- `check_syntax.py` (repo root) - trial-remediation scratch tool that `py_compile`-checks recently modified backend files; not part of the app.
 - `docs/handoffs/` - session continuation notes.
 
 ## Verification Discipline
