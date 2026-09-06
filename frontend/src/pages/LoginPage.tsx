@@ -5,6 +5,16 @@ import { useAuth } from "../components/AuthContext";
 import { useToast } from "../components/Toast";
 import { api } from "../lib/api";
 
+// 注册用户名口径与后端 RegisterPayload 一致：2-32 字符、禁止任何空白字符
+// （含全角空格；内部空格造成登录身份歧义）。中文合法。返回错误文案或 null。
+export function usernameValidationError(username: string): string | null {
+  const trimmed = username.trim();
+  if (!trimmed) return "请填写用户名";
+  if (/\s/.test(trimmed)) return "用户名不能包含空格";
+  if (trimmed.length < 2 || trimmed.length > 32) return "用户名需 2-32 个字符";
+  return null;
+}
+
 export function LoginPage() {
   const auth = useAuth();
   const toast = useToast();
@@ -14,12 +24,18 @@ export function LoginPage() {
   const [busy, setBusy] = useState(false);
 
   async function submit() {
-    if (!username.trim() || !password) {
+    if (mode === "register") {
+      const usernameError = usernameValidationError(username);
+      if (usernameError) {
+        toast.error(usernameError);
+        return;
+      }
+      if (password.length < 6) {
+        toast.error("密码至少 6 位");
+        return;
+      }
+    } else if (!username.trim() || !password) {
       toast.error("请填写用户名和密码");
-      return;
-    }
-    if (mode === "register" && password.length < 6) {
-      toast.error("密码至少 6 位");
       return;
     }
     setBusy(true);

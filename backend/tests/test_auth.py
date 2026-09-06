@@ -68,6 +68,20 @@ def test_duplicate_username_rejected(tmp_path):
     assert again.status_code == 400
 
 
+def test_register_username_rejects_whitespace(tmp_path):
+    client = make_client(tmp_path)
+    for name in ("has space", " leading", "trailing ", "tab\tuser", "全角\u3000空格"):
+        response = client.post("/api/auth/register", json={"username": name, "password": "secret123"})
+        assert response.status_code == 422, name
+
+
+def test_register_username_allows_chinese(tmp_path):
+    client = make_client(tmp_path)
+    response = client.post("/api/auth/register", json={"username": "中文用户名", "password": "secret123"})
+    assert response.status_code == 201
+    assert response.json()["username"] == "中文用户名"
+
+
 def test_wrong_password_rejected(tmp_path):
     client = make_client(tmp_path)
     client.post("/api/auth/register", json={"username": "alice", "password": "secret123"})

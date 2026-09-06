@@ -273,7 +273,9 @@ class Profile(BaseModel):
 
 
 class RegisterPayload(BaseModel):
-    username: str = Field(min_length=2, max_length=32)
+    # 用户名禁止任何空白字符（含全角空格）：内部空格造成登录身份歧义，
+    # 历史上曾产生过垃圾账号；中文用户名对本产品合法，不限制。
+    username: str = Field(min_length=2, max_length=32, pattern=r"^\S+$")
     password: str = Field(min_length=6, max_length=128)
 
 
