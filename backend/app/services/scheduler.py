@@ -155,7 +155,10 @@ class DailyScheduler:
         return False
 
     def _next_wait_seconds(self) -> float:
-        now = self._clock()
+        # 目标时刻按本地墙钟解释（SUBSCRIPTION_SCAN_HOUR=9 意为本地 09:00）：
+        # 时钟统一是 UTC，必须先转到本地时区再替换时刻，否则 9 点会在
+        # UTC+8 环境落到当天 17:00（此前两晚自动抓取实际 17:00 触发的根因）。
+        now = self._clock().astimezone()
         target = now.replace(hour=self._hour, minute=self._minute, second=0, microsecond=0)
         if target <= now:
             target += timedelta(days=1)

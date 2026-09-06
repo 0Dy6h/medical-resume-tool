@@ -1259,3 +1259,34 @@ def auth_headers_carol(client: TestClient) -> dict[str, str]:
     response = client.post("/api/auth/login", json={"username": "carol", "password": "secret123"})
     assert response.status_code == 200, response.text
     return {"Authorization": f"Bearer {response.json()['token']}"}
+
+
+def test_next_wait_targets_local_wall_clock(tmp_path):
+    """每日目标时刻按本地墙钟解释：hour=9 应在本地 09:00 触发，而非 UTC 09:00。
+
+    旧实现直接在 UTC 时钟上 replace(hour=9)，在 UTC+8 环境使每日维护循环
+    实际于本地 17:00 触发（2026-09-05/09-06 两天的 auto 抓取均落在 17:00）。
+    """
+    from datetime import datetime, timedelta, timezone
+
+    from app.services.database import create_engine
+    from app.services.scheduler import DailyScheduler
+
+    db_path = tmp_path / "sched-local-test.db"
+    engine = create_engine(f"sqlite:///{db_path}")
+    reset_db(engine)
+    init_db(engine)
+
+    # 冻结在 UTC 00:30（本地 UTC+8 为 08:30）：本地 09:00 还没到，
+    # 期望下一轮在 30 分钟后触发；若按 UTC 解释则会等到 8.5 小时后。
+    fixed = datetime(2026, 1, 15, 0, 30, 0, tzinfo=timezone.utc)
+    scheduler = DailyScheduler(engine, hour=9, clock=lambda: fixed, catch_up=False)
+
+    wait = scheduler._next_wait_seconds()
+    fire_at_local = (fixed + timedelta(seconds=wait)).astimezone()
+    local_now = fixed.astimezone()
+    assert (fire_at_local.hour, fire_at_local.minute) == (9, 0), (
+        f"next run at local {fire_at_local.isoformat()}, want 09:00 local"
+    )
+    expected_day = local_now.date() if local_now.replace(hour=9, minute=0) > local_now else local_now.date() + timedelta(days=1)
+    assert fire_at_local.date() == expected_day
