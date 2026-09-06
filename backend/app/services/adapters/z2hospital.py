@@ -12,6 +12,8 @@ from urllib.parse import urljoin
 import httpx
 from bs4 import BeautifulSoup
 
+from app.config import config
+from app.services.adapters.image_table_ocr import ocr_condition_tables
 from app.services.classifier import normalize_text
 from app.services.crawler import ParsedJob, parse_job_from_text
 from app.services.http_client import build_crawl_client
@@ -49,15 +51,26 @@ def extract_article_links(html: str, base_url: str) -> list[dict[str, str]]:
     return results
 
 
-def extract_job_from_article(html: str, source_url: str, institution: dict[str, Any]) -> ParsedJob | None:
-    """从单条招聘启事页面提取岗位信息。"""
+def extract_job_from_article(
+    html: str,
+    source_url: str,
+    institution: dict[str, Any],
+    *,
+    extra_body: str = "",
+) -> ParsedJob | None:
+    """从单条招聘启事页面提取岗位信息。
+
+    extra_body：图片条件表 OCR 文本（image_table_ocr 产物），并入正文尾部
+    走同一条解析管线；纯图片公告（正文行数不足）靠它才能进入解析。
+    """
     soup = BeautifulSoup(html, "html.parser")
     main = soup.find("div", class_="main")
     if not main:
         return None
     text = main.get_text("\n")
     lines = [l.strip() for l in text.split("\n") if l.strip()]
-    if len(lines) < 5:
+    has_extra = bool(extra_body.strip())
+    if len(lines) < 5 and not has_extra:
         return None
 
     # 提取标题：通常在 "关于招聘..." 或 "招聘..." 行
@@ -91,6 +104,8 @@ def extract_job_from_article(html: str, source_url: str, institution: dict[str, 
                 break
             body_lines.append(line)
     body = "\n".join(body_lines) if body_lines else "\n".join(lines)
+    if has_extra:
+        body = f"{body}\n{extra_body.strip()}"
 
     return parse_job_from_text(
         title=normalize_text(title),
@@ -118,6 +133,14 @@ async def crawl_z2hospital(institution: dict[str, Any]) -> list[ParsedJob]:
                 art_resp = await client.get(article["url"])
                 art_resp.raise_for_status()
                 job = extract_job_from_article(art_resp.text, article["url"], institution)
+                # 图片条件表兜底：正文碎片化（解析失败或条件为空）时 OCR 公告内图片重解析。
+                # OCR 全程诚实降级（依赖缺失/识别为空 → 空文本），失败不打断抓取。
+                if (job is None or not job.requirements.strip()) and config.image_table_ocr_enabled:
+                    ocr_text = await ocr_condition_tables(client, art_resp.text, article["url"])
+                    if ocr_text:
+                        job = extract_job_from_article(
+                            art_resp.text, article["url"], institution, extra_body=ocr_text
+                        )
                 if job:
                     jobs.append(job)
             except httpx.HTTPError:

@@ -30,5 +30,9 @@ class Config:
     # 每日自动抓取（A3）：与订阅扫描同一时钟点，先抓取后扫描
     auto_crawl_enabled: bool = os.getenv("AUTO_CRAWL_ENABLED", "true").lower() == "true"
 
+    # 图片条件表 OCR（z2 等把「岗位及条件」表发成 PNG 的公告）：默认开；
+    # 语言/命令与履历图片导入共用 PROFILE_IMPORT_OCR_LANGUAGES / TESSERACT_CMD
+    image_table_ocr_enabled: bool = os.getenv("IMAGE_TABLE_OCR_ENABLED", "true").lower() == "true"
+
 
 config = Config()

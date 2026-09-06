@@ -258,6 +258,12 @@ export function ResumePage({ onNavigate }: { onNavigate?: (page: string) => void
 
   async function generate() {
     if (!jobId) return;
+    // 同岗位重复生成按版本式保留（后端不改）；已有历史草稿时生成前显式确认，
+    // 避免「只是想刷新看看」的用户在不知情下多出一份草稿。
+    if (draftHistory.length > 0 &&
+        !window.confirm(`该岗位已有 ${draftHistory.length} 份历史草稿，将另外生成一份新草稿（历史版本全部保留），确定继续吗？`)) {
+      return;
+    }
     setLoading(true);
     try {
       const newDraft = await api.createResumeDraft(Number(jobId));
