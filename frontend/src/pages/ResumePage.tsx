@@ -8,6 +8,10 @@ import type { Job, ResumeDraft, ResumeDraftSummary, ResumeSection } from "../typ
 
 // ── Pure helpers (exported for testing) ──────────────────────────────
 
+// 岗位下拉取数对齐后端 /api/jobs 的 limit 上限：默认 100 条在数据量增长后会把
+// 较早的岗位（含 fixture 演示岗）挤出入口（遗留#5 拍板：提高上限，搜索留作产品增强）。
+export const JOB_DROPDOWN_LIMIT = 500;
+
 export type ReviewEntry = {
   sectionId: string;
   sectionTitle: string;
@@ -207,7 +211,7 @@ export function ResumePage({ onNavigate }: { onNavigate?: (page: string) => void
   async function refreshJobs() {
     setJobsLoading(true);
     try {
-      const payload = await api.jobs();
+      const payload = await api.jobs({ limit: JOB_DROPDOWN_LIMIT });
       setJobs(payload.items);
       if (!jobId && payload.items[0]) setJobId(payload.items[0].id);
     } catch (error) {

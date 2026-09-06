@@ -1,6 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { flattenReviewItems, computeDraftStatus, reviewTone, filterExportSections, exportBlock, readPendingDraftId, PENDING_DRAFT_KEY, isUnlinkedReviewItem, shouldResetDraftOnJobChange, reviewCompletion, unlinkedExportCount, mismatchNoticeFromError } from "./ResumePage";
+import { flattenReviewItems, computeDraftStatus, reviewTone, filterExportSections, exportBlock, readPendingDraftId, PENDING_DRAFT_KEY, isUnlinkedReviewItem, shouldResetDraftOnJobChange, reviewCompletion, unlinkedExportCount, mismatchNoticeFromError, JOB_DROPDOWN_LIMIT } from "./ResumePage";
 import type { ResumeSection } from "../types";
+
+describe("JOB_DROPDOWN_LIMIT — 岗位下拉取数对齐后端上限", () => {
+  it("必须取 500 条（后端 /api/jobs 上限），否则 348+ 条数据时较早岗位从下拉不可达", () => {
+    expect(JOB_DROPDOWN_LIMIT).toBe(500);
+  });
+});
 
 describe("shouldResetDraftOnJobChange — 切岗时草稿上下文必须跟随选择器", () => {
   it("草稿属于其他岗位 → 需清除（禁止显示岗位 B 却导出岗位 A 草稿）", () => {
