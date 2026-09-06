@@ -54,12 +54,15 @@ def list_institutions(engine: DatabaseEngine) -> list[dict[str, Any]]:
 
 
 def get_institutions_by_ids(engine: DatabaseEngine, ids: list[int] | None) -> list[dict[str, Any]]:
+    # None（未指定）→ 全部启用机构；显式空列表 → 空结果（由调用方决定如何拒绝）。
     with connect(engine) as conn:
-        if ids:
+        if ids is None:
+            rows = conn.execute("SELECT * FROM institutions WHERE enabled = 1 ORDER BY id").fetchall()
+        elif not ids:
+            rows = []
+        else:
             placeholders = ",".join("?" for _ in ids)
             rows = conn.execute(f"SELECT * FROM institutions WHERE id IN ({placeholders}) ORDER BY id", ids).fetchall()
-        else:
-            rows = conn.execute("SELECT * FROM institutions WHERE enabled = 1 ORDER BY id").fetchall()
     items = rows_to_dicts(rows)
     for item in items:
         item["enabled"] = bool(item["enabled"])

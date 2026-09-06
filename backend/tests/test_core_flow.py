@@ -811,6 +811,28 @@ def test_report_generation_contains_scope_and_sources(tmp_path):
     assert "<li>" in payload["html"]
 
 
+def test_report_rejects_blank_title_and_trims_input(tmp_path):
+    client = make_client(tmp_path)
+    crawl_and_wait(client, [1])
+
+    for title in ("", "   "):
+        report = client.post("/api/reports", json={"title": title, "filters": {}})
+        assert report.status_code == 422, repr(title)
+
+    trimmed = client.post("/api/reports", json={"title": "  报告A  ", "filters": {}})
+    assert trimmed.status_code == 201
+    assert trimmed.json()["title"] == "报告A"
+
+
+def test_crawl_run_rejects_empty_institution_ids(tmp_path):
+    """显式空列表必须 422，不得静默替换成「全部启用机构」（缺省 None 才是全部）。"""
+    client = make_client(tmp_path)
+    headers = auth_headers(client)
+
+    resp = client.post("/api/crawl-runs", json={"institution_ids": []}, headers=headers)
+    assert resp.status_code == 422
+
+
 def test_report_html_escapes_title_and_lines(tmp_path):
     client = make_client(tmp_path)
     crawl_and_wait(client, [1])

@@ -572,6 +572,15 @@ class ReportCreate(BaseModel):
     title: str = "医疗岗位市场分析报告"
     filters: dict[str, Any] = Field(default_factory=dict)
 
+    @field_validator("title")
+    @classmethod
+    def validate_title(cls, v: str) -> str:
+        """Blank titles ("" / whitespace) would render as an empty report heading."""
+        stripped = v.strip()
+        if not stripped:
+            raise ValueError("报告标题不能为空")
+        return stripped
+
     @field_validator("filters")
     @classmethod
     def validate_filters(cls, v: dict[str, Any]) -> dict[str, Any]:

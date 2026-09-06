@@ -239,6 +239,8 @@ def create_app(database_url: str | None = None) -> FastAPI:
     ) -> dict:
         from app.config import config
         from app.services.seeds import BLOCKED_REASONS
+        if payload.institution_ids is not None and not payload.institution_ids:
+            raise HTTPException(status_code=422, detail="请至少选择一个机构再启动抓取")
         institutions_to_crawl = get_institutions_by_ids(engine, payload.institution_ids)
         if not institutions_to_crawl:
             raise HTTPException(status_code=404, detail="没有找到可抓取的机构")
@@ -657,6 +659,8 @@ def create_app(database_url: str | None = None) -> FastAPI:
             institution_ids = [inst["id"] for inst in enabled if inst["enabled"]]
             # Cap at 12
             institution_ids = institution_ids[:12]
+        if not institution_ids:
+            raise HTTPException(status_code=422, detail="请至少选择 1 家机构")
 
         # Validate all institution IDs exist
         institutions = get_institutions_by_ids(engine, institution_ids)

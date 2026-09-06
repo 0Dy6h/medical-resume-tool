@@ -121,6 +121,20 @@ def test_create_subscription_default_institutions(tmp_path):
     assert len(data["institution_ids"]) <= 12
 
 
+def test_create_subscription_rejects_empty_institution_ids(tmp_path):
+    """显式空列表必须 422，不得静默替换成「全部启用机构」（None 才是默认全部）。"""
+    client = make_client(tmp_path)
+    user = register_user(client, "alice")
+    headers = auth_headers(user["token"])
+
+    resp = client.post(
+        "/api/subscriptions",
+        json={"name": "空机构订阅", "keyword": "内科", "institution_ids": []},
+        headers=headers,
+    )
+    assert resp.status_code == 422
+
+
 def test_create_subscription_validates_name_length(tmp_path):
     client = make_client(tmp_path)
     user = register_user(client, "alice")
@@ -1046,9 +1060,16 @@ def test_crawl_triggers_subscription_scan(tmp_path):
 
     listed = client.get("/api/subscriptions", headers=headers)
     sub = listed.json()[0]
+    # 爬取钩子的 finally 段先写 completed、后跑 scan_subscriptions（30dbfb8 在
+    # test_notifications 修过同款竞态），故轮询宽限而非 completed 后立即断言。
+    old_pushed = iso_days_ago(2)
+    deadline = time.time() + 5
+    while time.time() < deadline and sub["last_pushed_at"] <= old_pushed:
+        time.sleep(0.1)
+        listed = client.get("/api/subscriptions", headers=headers)
+        sub = listed.json()[0]
     # After crawl, jobs were inserted with fetched_at=now > backdated last_pushed_at
     # so scan should have advanced last_pushed_at
-    old_pushed = iso_days_ago(2)
     assert sub["last_pushed_at"] > old_pushed
 
 
