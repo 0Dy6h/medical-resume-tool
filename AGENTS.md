@@ -88,6 +88,7 @@ pnpm dev
 - `frontend/src/components/` - shared UI components (AuthContext, Toast, DetailDrawer, NotificationBell, StatusPill, …), tests alongside as `*.test.ts`.
 - `frontend/src/pages/` - workbench pages (tests live alongside as `*.test.ts`).
 - `backend/scripts/` - offline utilities run from `backend/`: `build_idf.py` (IDF table), `export_preview.py`, `measure_jobs_layout.py`, `cleanup_test_accounts.py` (deletes accumulated trial/probe accounts from the db in FK-safe order; dry-run by default, `--apply` auto-backs-up the db file first, only touches accounts matching test naming patterns such as `trial_*` / `verify*` / `smoke_*` unless `--also` names them explicitly).
+- `scripts/` (repo root) - local dev tooling: `start-local.ps1` + `tcmjob*.bat` start/stop wrappers (see Commands), `README-tcmjob.md` mechanism doc, and `md_to_docx.py` (one-shot markdown→docx converter that regenerated `docs/beta-announcement.docx`; input/output paths hardcoded in its `__main__` — not part of the app).
 - `medical-job-prd/` - self-contained product PRD (static HTML, no build step).
 - `check_syntax.py` (repo root) - trial-remediation scratch tool that `py_compile`-checks recently modified backend files; not part of the app.
 - `docs/handoffs/` - session continuation notes.
