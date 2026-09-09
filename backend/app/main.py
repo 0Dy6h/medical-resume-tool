@@ -410,7 +410,11 @@ def create_app(database_url: str | None = None) -> FastAPI:
         )
 
     @app.post("/api/reports", response_model=ReportOut, status_code=201)
-    def reports(payload: ReportCreate, engine: Annotated[DatabaseEngine, Depends(get_engine)]) -> dict:
+    def reports(
+        payload: ReportCreate,
+        engine: Annotated[DatabaseEngine, Depends(get_engine)],
+        user: Annotated[dict, Depends(get_current_user)],
+    ) -> dict:
         return generate_report(engine, payload.title, payload.filters)
 
     @app.get("/api/profile")

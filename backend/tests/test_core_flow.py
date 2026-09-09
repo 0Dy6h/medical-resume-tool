@@ -796,9 +796,10 @@ def test_job_status_deadline_must_be_iso_date(tmp_path):
 
 def test_report_generation_contains_scope_and_sources(tmp_path):
     client = make_client(tmp_path)
+    auth = auth_headers(client)
     crawl_and_wait(client, [1, 2])
 
-    report = client.post("/api/reports", json={"title": "医疗岗位样本分析"})
+    report = client.post("/api/reports", json={"title": "医疗岗位样本分析"}, headers=auth)
     assert report.status_code == 201
     payload = report.json()
     assert "医疗岗位样本分析" in payload["title"]
@@ -813,13 +814,14 @@ def test_report_generation_contains_scope_and_sources(tmp_path):
 
 def test_report_rejects_blank_title_and_trims_input(tmp_path):
     client = make_client(tmp_path)
+    auth = auth_headers(client)
     crawl_and_wait(client, [1])
 
     for title in ("", "   "):
-        report = client.post("/api/reports", json={"title": title, "filters": {}})
+        report = client.post("/api/reports", json={"title": title, "filters": {}}, headers=auth)
         assert report.status_code == 422, repr(title)
 
-    trimmed = client.post("/api/reports", json={"title": "  报告A  ", "filters": {}})
+    trimmed = client.post("/api/reports", json={"title": "  报告A  ", "filters": {}}, headers=auth)
     assert trimmed.status_code == 201
     assert trimmed.json()["title"] == "报告A"
 
@@ -835,9 +837,10 @@ def test_crawl_run_rejects_empty_institution_ids(tmp_path):
 
 def test_report_html_escapes_title_and_lines(tmp_path):
     client = make_client(tmp_path)
+    auth = auth_headers(client)
     crawl_and_wait(client, [1])
 
-    report = client.post("/api/reports", json={"title": "<script>alert(1)</script>"})
+    report = client.post("/api/reports", json={"title": "<script>alert(1)</script>"}, headers=auth)
 
     assert report.status_code == 201
     html = report.json()["html"]
@@ -848,6 +851,7 @@ def test_report_html_escapes_title_and_lines(tmp_path):
 def test_report_rejects_invalid_filters(tmp_path):
     """Free-form filters must 422, not 500 on int() or silently count all jobs."""
     client = make_client(tmp_path)
+    auth = auth_headers(client)
     crawl_and_wait(client, [1])
 
     for filters in (
@@ -860,21 +864,37 @@ def test_report_rejects_invalid_filters(tmp_path):
         {"unknown_key": "x"},
         {"institution_id": "abc"},
     ):
-        report = client.post("/api/reports", json={"title": "过滤校验", "filters": filters})
+        report = client.post("/api/reports", json={"title": "过滤校验", "filters": filters}, headers=auth)
         assert report.status_code == 422, f"filters={filters} -> {report.status_code}"
 
 
 def test_report_accepts_valid_filters(tmp_path):
     client = make_client(tmp_path)
+    auth = auth_headers(client)
     crawl_and_wait(client, [1])
 
     report = client.post(
         "/api/reports",
         json={"title": "t", "filters": {"trust": "disabled", "fresh_days": "7", "institution_id": "1"}},
+        headers=auth,
     )
 
     assert report.status_code == 201
     assert "岗位样本" in report.json()["markdown"]
+
+
+def test_report_creation_requires_auth(tmp_path):
+    """POST /api/reports 是写端点，与其它写端点一致必须登录，不得匿名写入。"""
+    client = make_client(tmp_path)
+    crawl_and_wait(client, [1])
+
+    anonymous = client.post("/api/reports", json={"title": "匿名报告"})
+    assert anonymous.status_code in (401, 403)
+
+    auth = auth_headers(client)
+    ok = client.post("/api/reports", json={"title": "登录报告"}, headers=auth)
+    assert ok.status_code == 201
+    assert ok.json()["title"] == "登录报告"
 
 
 def test_profile_extended_collections_can_supply_resume_evidence(tmp_path):
