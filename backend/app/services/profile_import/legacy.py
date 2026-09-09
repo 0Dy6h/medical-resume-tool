@@ -224,7 +224,11 @@ def _ocr_image_bytes(content: bytes, *, source_label: str) -> tuple[list[str], l
         if getattr(image, "n_frames", 1) > MAX_IMAGE_FRAMES:
             warnings.append(f"{source_label} 包含多帧图片，仅 OCR 前 {MAX_IMAGE_FRAMES} 帧")
         for index, frame in enumerate(frames, start=1):
-            prepared = ImageOps.exif_transpose(frame).convert("RGB")
+            try:
+                prepared = ImageOps.exif_transpose(frame).convert("RGB")
+            except Exception as exc:
+                warnings.append(f"{source_label} 图片帧无法解码：{exc}")
+                break
             try:
                 text = _image_to_string(pytesseract, prepared)
             except Exception as exc:
@@ -234,6 +238,8 @@ def _ocr_image_bytes(content: bytes, *, source_label: str) -> tuple[list[str], l
                 lines.extend(text.splitlines())
                 if len(frames) > 1 and index < len(frames):
                     lines.append("")
+    except Exception as exc:
+        raise ProfileImportError("无法读取该图片文件，请确认文件未损坏") from exc
     finally:
         image.close()
     return lines, _dedupe(warnings)

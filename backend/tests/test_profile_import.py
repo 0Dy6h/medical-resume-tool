@@ -249,6 +249,27 @@ def test_import_endpoint_accepts_image_ocr_text(tmp_path, monkeypatch):
     assert "OCR 低置信样例" in payload["warnings"]
 
 
+def test_import_endpoint_broken_image_degrades_to_warnings(tmp_path):
+    """截断的图片流不得 500：帧解码失败降级为 warning（诚实降级链）。"""
+    client = make_client(tmp_path)
+    auth = auth_headers(client)
+    broken_png = bytes.fromhex(
+        "89504e470d0a1a0a0000000d49484452000000010000000108020000009077"
+        "53de0000000c4944415408d763f8cfc00000030101cf34cc6a000000004945"
+        "4e44ae426082"
+    )
+    response = client.post(
+        "/api/profile/import",
+        files={"file": ("broken.png", broken_png, "image/png")},
+        headers=auth,
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert any(("无法解码" in w) or ("未识别" in w) for w in payload["warnings"])
+    assert payload["education"] == []
+
+
 def test_import_endpoint_requires_auth(tmp_path):
     client = make_client(tmp_path)
     response = client.post(
