@@ -329,3 +329,42 @@ def test_extract_plain_text_strips_markdown_headings_only_for_md():
     # txt 不剥离：# 是字面内容
     txt = extract_plain_text(content)
     assert txt.lines[0] == "# 王五"
+
+
+def test_import_bare_name_label_line_is_not_taken_as_name(tmp_path):
+    """裸「姓名」标签行不能冒充 basics.name（2026-09-11 夜班巡逻发现）。
+
+    md「# 姓名」剥离标记后剩 2 字纯汉字，通过位置启发式兜底把标签词
+    「姓名」填成了姓名，下一行真名反而落选。标签词只接受显式分隔形式
+    （「姓名：张三」走 _NAME_LABEL_RE 强信号）。
+    """
+    client = make_client(tmp_path)
+    auth = auth_headers(client)
+    markdown = "# 姓名\n李四\n电话：13500000006\n"
+    response = client.post(
+        "/api/profile/import",
+        files={"file": ("resume.md", markdown.encode("utf-8"), "text/markdown")},
+        headers=auth,
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["basics"]["name"] == "李四"
+    assert payload["basics"]["phone"] == "13500000006"
+
+
+def test_import_labelled_name_line_still_strong_signal(tmp_path):
+    """显式标签「姓名：张三」强信号路径不受裸标签黑名单影响。"""
+    client = make_client(tmp_path)
+    auth = auth_headers(client)
+    text = "姓名：张三\n电话：13500000007\n"
+    response = client.post(
+        "/api/profile/import",
+        files={"file": ("resume.txt", text.encode("utf-8"), "text/plain")},
+        headers=auth,
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["basics"]["name"] == "张三"
+    assert payload["basics"]["phone"] == "13500000007"

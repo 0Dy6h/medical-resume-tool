@@ -84,6 +84,9 @@ _PURE_CJK_RE = re.compile(r"^[\u4e00-\u9fff]{2,4}$")
 _RESUME_TITLE_TEXTS = frozenset(
     {"个人简历", "简历", "求职简历", "应聘简历", "个人履历", "履历", "个人简介", "个人求职简历"}
 )
+# 裸标签行不是姓名（「# 姓名」剥离 markdown 标记后剩 2 字纯汉字，会通过
+# 位置启发式冒充姓名，真名反而落选）；真名仍靠标签显式分隔或后续行兜底。
+_NAME_LABEL_TEXTS = frozenset({"姓名", "名字", "称谓"})
 
 _SECTION_HEADING_TEXTS: set[str] = set()
 for _aliases in SECTION_ALIASES.values():
@@ -166,6 +169,8 @@ def _is_likely_name(text: str) -> bool:
     if not _PURE_CJK_RE.match(stripped):
         return False
     if stripped in _SECTION_HEADING_TEXTS or stripped in _RESUME_TITLE_TEXTS:
+        return False
+    if stripped in _NAME_LABEL_TEXTS:
         return False
     for suffix_list in (_ORG_SUFFIXES, _ROLE_SUFFIXES, _SCHOOL_SUFFIXES):
         if any(suffix in stripped for suffix in suffix_list):
