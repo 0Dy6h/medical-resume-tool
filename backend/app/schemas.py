@@ -647,6 +647,14 @@ class SubscriptionCreate(BaseModel):
                 raise ValueError("机构数量必须在 1-12 之间")
         return value
 
+    @field_validator("name")
+    @classmethod
+    def _check_name_not_blank(cls, value: str) -> str:
+        """纯空白名（如 "  "）长度达标但 strip 后为空串,拒绝入库。"""
+        if not value.strip():
+            raise ValueError("订阅名称不能为空")
+        return value.strip()
+
     @field_validator("keyword")
     @classmethod
     def _check_keyword_not_blank(cls, value: str) -> str:

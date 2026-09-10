@@ -157,6 +157,20 @@ def test_create_subscription_validates_name_length(tmp_path):
     assert resp.status_code == 422
 
 
+def test_create_subscription_rejects_blank_name(tmp_path):
+    """纯空白名长度达标但 strip 后为空串,必须 422(与 keyword 同口径)。"""
+    client = make_client(tmp_path)
+    user = register_user(client, "alice")
+    headers = auth_headers(user["token"])
+
+    resp = client.post(
+        "/api/subscriptions",
+        json={"name": "   ", "keyword": "内科", "institution_ids": [1]},
+        headers=headers,
+    )
+    assert resp.status_code == 422
+
+
 def test_create_subscription_validates_keyword_length(tmp_path):
     client = make_client(tmp_path)
     user = register_user(client, "alice")
