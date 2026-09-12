@@ -6,7 +6,12 @@ rem
 rem  usage: type  tcmjob  in any cmd window
 rem    - starts backend(8000) + frontend(5173), opens browser
 rem    - Ctrl+C / Ctrl+Break / closing this window stops everything
-rem      (a watchdog detects the window death and runs tcmjob-stop)
+rem      (a watchdog in its own minimized window watches a heartbeat
+rem       file that this script refreshes every second; when this
+rem       window dies the heartbeat goes stale and the watchdog
+rem       runs tcmjob-stop. Do NOT watch window titles/PIDs: the
+rem       title survives Ctrl+C in an interactive cmd, so it can
+rem       never signal the death of the batch.)
 rem    - tcmjob-stop also stops both services from anywhere
 rem ============================================================
 
@@ -14,10 +19,11 @@ if "%TCM_HOME%"=="" set "TCM_HOME=D:\ó¦Ð·'s Projects\ó¦Ð·µÄ¼òÀú×«Ð´¹¤¾ß"
 
 set "BACKEND_PORT=8000"
 set "FRONTEND_PORT=5173"
+set "HB=%TCM_HOME%\logs\tcm-heartbeat.flag"
 
-rem unique window title: fixed prefix + random suffix (watchdog watches this)
+rem unique random window title so the windows are tellable apart
 set "TCM_TITLE=tcmjob-%RANDOM%%RANDOM%"
-title "%TCM_TITLE%"
+title tcmjob %TCM_TITLE%
 
 echo.
 echo   [tcmjob] Medical Job Workbench
@@ -47,7 +53,7 @@ rem ---- helper scripts (avoids quote-nesting inside start) ----
     echo @echo off
     echo set CI=true
     echo cd /d "%TCM_HOME%\frontend"
-    echo pnpm dev --host 127.0.0.1 --port %FRONTEND_PORT%^> "%TCM_HOME%\logs\tcm-frontend.log" 2^>^&1
+    echo pnpm dev --port %FRONTEND_PORT%^> "%TCM_HOME%\logs\tcm-frontend.log" 2^>^&1
 )
 
 echo   [tcmjob] starting backend  http://127.0.0.1:%BACKEND_PORT% ...
@@ -79,6 +85,11 @@ echo   [tcmjob] frontend ready  http://127.0.0.1:%FRONTEND_PORT%
 echo   [tcmjob] logs            %TCM_HOME%\logs\tcm-*.log
 echo.
 
+rem ---- warm-up: dev server compiles on the first page hit, so fetch ----
+rem ---- index once ourselves or the browser eats that cold compile ----
+echo   [tcmjob] warming up frontend (first hit compiles, can take a bit)...
+curl -s -o nul --max-time 60 http://127.0.0.1:%FRONTEND_PORT%/ 2>nul
+
 start "" http://127.0.0.1:%FRONTEND_PORT%/
 
 echo   ============================================================
@@ -86,28 +97,38 @@ echo    All services up. Press Ctrl+C here to stop everything.
 echo   ============================================================
 echo.
 
-rem ---- watchdog: when THIS window dies (Ctrl+C / close), stop all ----
+rem ---- watchdog: a separate minimized window checks the heartbeat ----
+rem ---- file every ~3s; stale for 8s means THIS window died, and   ----
+rem ---- then it stops both services and exits. goto-branching is   ----
+rem ---- deliberate: `if x call y & exit` would run the exit on     ----
+rem ---- EVERY beat (& is not bound to the if), killing the watchdog ----
+rem ---- after one beat no matter what.                              ----
 > "%TCM_HOME%\logs\tcm-watchdog.cmd" (
     echo @echo off
+    echo set "HB=%HB%"
     echo :watch
     echo ping -n 3 127.0.0.1 ^>nul
-    echo tasklist /V /FI "WINDOWTITLE eq %1" 2^>nul ^| findstr /i "cmd.exe" ^>nul 2^>nul
-    echo if not errorlevel 1 goto :watch
+    echo powershell -NoProfile -Command "if(((Get-Date)-[System.IO.File]::GetLastWriteTime($env:HB)).TotalSeconds -ge 8){exit 1}"
+    echo if errorlevel 1 goto :stop
+    echo goto :watch
+    echo :stop
     echo call "%~d0%~p0tcmjob-stop.bat" ^>nul 2^>nul
+    echo exit /b 0
 )
-start "tcmjob-watchdog" /min cmd /c ""%TCM_HOME%\logs\tcm-watchdog.cmd"" "%TCM_TITLE%""
+start "tcmjob-watchdog" /min cmd /c ""%TCM_HOME%\logs\tcm-watchdog.cmd""
 
-rem ---- foreground hold: Ctrl+C here = window dies = watchdog fires ----
-pause >nul
+rem ---- foreground hold: refresh the heartbeat every ~1s while alive ----
+rem ---- (echo writes real bytes; copy /b +,, and break> do NOT bump ----
+rem ---- the mtime on this machine, the watchdog would see a stale   ----
+rem ---- heartbeat and kill the stack while it is running)           ----
+break>"%HB%"
+:hold
+ping -n 2 127.0.0.1 >nul
+echo x>"%HB%"
+goto :hold
 
-rem ---- graceful path (user pressed a key instead of Ctrl+C) ----
-echo.
-echo   [tcmjob] stopping services...
-call :stopport %FRONTEND_PORT% "frontend"
-call :stopport %BACKEND_PORT% "backend"
-echo   [tcmjob] all stopped.
-ping -n 3 127.0.0.1 >nul
-exit /b 0
+:fail
+exit /b 1
 
 :cleanup
 echo.
