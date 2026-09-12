@@ -14,6 +14,34 @@ export const emptyProfile: Profile = {
   mode: "experienced"
 };
 
+const COLLECTION_KEYS = [
+  "education",
+  "experiences",
+  "projects",
+  "publications",
+  "certificates",
+  "skills",
+  "teaching",
+  "awards",
+  "languages"
+] as const;
+
+/**
+ * 一键清空后的档案：全部数据回到空档案，仅保留呈现模式偏好（应届生/职场人）。
+ * basics 与各集合均为新引用，避免与 emptyProfile 模块常量共享可变引用。
+ */
+export function clearedProfile(profile: Profile): Profile {
+  return { ...emptyProfile, basics: {}, mode: profile.mode ?? emptyProfile.mode };
+}
+
+/** 档案是否完全没有已输入信息（基本信息全空白 + 九类条目全空）。 */
+export function profileIsEmpty(profile: Profile): boolean {
+  const basics = profile.basics ?? {};
+  const hasBasics = Object.values(basics).some((value) => String(value ?? "").trim() !== "");
+  if (hasBasics) return false;
+  return COLLECTION_KEYS.every((key) => ((profile[key] as unknown[] | undefined) ?? []).length === 0);
+}
+
 export const demoProfile: Profile = {
   basics: {
     name: "林晓",

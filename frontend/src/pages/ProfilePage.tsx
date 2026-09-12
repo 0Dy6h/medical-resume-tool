@@ -3,7 +3,7 @@ import { useRef, useEffect, useState, useMemo } from "react";
 import { ButtonSpinner } from "../components/ButtonSpinner";
 import { useToast } from "../components/Toast";
 import { api } from "../lib/api";
-import { demoProfile, emptyProfile, matchesDemoProfile } from "../lib/defaultProfile";
+import { clearedProfile, demoProfile, emptyProfile, matchesDemoProfile, profileIsEmpty } from "../lib/defaultProfile";
 import { mergeImportSelection } from "../lib/importMerge";
 import { formatDeleteWarning, formatOverlapWarning, shouldShowDeleteWarning, shouldShowOverlapWarning } from "../lib/profileChecks";
 import type { Profile, ProfileImportResult } from "../types";
@@ -148,6 +148,40 @@ const MODE_LAYOUT: Record<"fresh_grad" | "experienced", { key: keyof Profile; co
     { key: "languages" }
   ]
 };
+
+/**
+ * 按呈现模式给出各板块的默认折叠集合（MODE_LAYOUT 中标记 collapsed 的板块）。
+ * 模式切换、载入演示数据、一键清空三处共用，避免各写一份重建循环。
+ */
+export function collapsedSetForMode(mode: "fresh_grad" | "experienced"): Set<string> {
+  const collapsed = new Set<string>();
+  MODE_LAYOUT[mode].forEach((item) => {
+    if (item.collapsed) collapsed.add(String(item.key));
+  });
+  return collapsed;
+}
+
+export type EditingStateSnapshot = {
+  preview: ProfileImportResult | null;
+  importError: string | null;
+  selectedKeys: Set<string>;
+  assignedBlocks: Record<string, string>;
+  blockAssignSelections: Record<string, string>;
+};
+
+/**
+ * 一键清空时应复位的一次性编辑态（导入预览、归类暂存等）。
+ * 每次调用返回全新实例，调用方逐字段套用，避免共享可变引用。
+ */
+export function freshEditingState(): EditingStateSnapshot {
+  return {
+    preview: null,
+    importError: null,
+    selectedKeys: new Set<string>(),
+    assignedBlocks: {},
+    blockAssignSelections: {},
+  };
+}
 
 const BASIC_FIELDS: Field[] = [
   { key: "name", label: "姓名" },
@@ -301,11 +335,30 @@ export function ProfilePage() {
   const [overlapExiting, setOverlapExiting] = useState(false);
   const [demoLoadConfirm, setDemoLoadConfirm] = useState(false);
   const [demoSaveConfirm, setDemoSaveConfirm] = useState(false);
+  const [clearConfirm, setClearConfirm] = useState(false);
+  const [clearing, setClearing] = useState(false);
   const [assignedBlocks, setAssignedBlocks] = useState<Record<string, string>>({});
   const [blockAssignSelections, setBlockAssignSelections] = useState<Record<string, string>>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
   const basicFormRef = useRef<HTMLElement>(null);
   const sectionRefs = useRef<Record<string, HTMLElement | null>>({});
+
+  // 最新档案引用：串行写队列中的任务执行时读取，保证落库内容与当前 UI 一致。
+  const profileRef = useRef(profile);
+  profileRef.current = profile;
+
+  // 档案写操作串行队列：保存与清空的 PUT 必须按用户操作顺序落库。并发发出时
+  // HTTP 不保证到达/落库顺序，旧档案的 PUT 可能落在空档案之后、静默「复活」数据。
+  const writeQueueRef = useRef<Promise<void>>(Promise.resolve());
+
+  function enqueueProfileWrite(task: () => Promise<void>): Promise<void> {
+    const run = writeQueueRef.current.then(task);
+    writeQueueRef.current = run.then(
+      () => {},
+      () => {}
+    );
+    return run;
+  }
 
   const currentMode: "fresh_grad" | "experienced" = profile.mode ?? "experienced";
 
@@ -321,14 +374,8 @@ export function ProfilePage() {
     api.profile().then((payload) => {
       const loaded = { ...emptyProfile, ...payload };
       setProfile(loaded);
-      // Set initial collapsed state based on loaded mode
       const mode = loaded.mode ?? "experienced";
-      const layout = MODE_LAYOUT[mode as "fresh_grad" | "experienced"];
-      const collapsed = new Set<string>();
-      layout.forEach((item) => {
-        if (item.collapsed) collapsed.add(String(item.key));
-      });
-      setCollapsedSections(collapsed);
+      setCollapsedSections(collapsedSetForMode(mode as "fresh_grad" | "experienced"));
     });
   }, []);
 
@@ -344,12 +391,7 @@ export function ProfilePage() {
   function switchMode(mode: "fresh_grad" | "experienced") {
     setProfile((current) => ({ ...current, mode }));
     // Reset collapsed state to mode defaults — never touches data
-    const layout = MODE_LAYOUT[mode];
-    const collapsed = new Set<string>();
-    layout.forEach((item) => {
-      if (item.collapsed) collapsed.add(String(item.key));
-    });
-    setCollapsedSections(collapsed);
+    setCollapsedSections(collapsedSetForMode(mode));
   }
 
   async function save() {
@@ -377,24 +419,58 @@ export function ProfilePage() {
   function loadDemoProfile() {
     setDemoLoadConfirm(false);
     setProfile(demoProfile);
-    const layout = MODE_LAYOUT[demoProfile.mode ?? "experienced"];
-    const collapsed = new Set<string>();
-    layout.forEach((item: { key: keyof Profile; collapsed?: boolean }) => {
-      if (item.collapsed) collapsed.add(String(item.key));
-    });
-    setCollapsedSections(collapsed);
+    setCollapsedSections(collapsedSetForMode(demoProfile.mode ?? "experienced"));
     toast.info("已载入演示数据（虚构示例），请勿保存为正式档案");
   }
 
   async function doSave() {
-    try {
-      await api.saveProfile(profile);
-      setSaved(true);
-      toast.success("履历已保存");
-      window.setTimeout(() => setSaved(false), 1600);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "保存失败");
-    }
+    await enqueueProfileWrite(async () => {
+      try {
+        // 执行时才读 profileRef：排队期间档案可能已被清空，落库内容必须与当前 UI 一致
+        await api.saveProfile(profileRef.current);
+        setSaved(true);
+        toast.success("履历已保存");
+        window.setTimeout(() => setSaved(false), 1600);
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "保存失败");
+      }
+    });
+  }
+
+  /**
+   * 一键清空：本地回到空档案并立即持久化，否则刷新/重进后后端旧数据会「复活」。
+   * 仅清数据，保留当前应届生/职场人呈现模式；导入预览等临时编辑态一并关闭。
+   * PUT 走串行写队列（见 enqueueProfileWrite），不会与在途保存乱序落库。
+   */
+  async function confirmClearProfile() {
+    setClearConfirm(false);
+    const cleared = clearedProfile(profile);
+    setProfile(cleared);
+    setCollapsedSections(collapsedSetForMode(cleared.mode ?? "experienced"));
+    const fresh = freshEditingState();
+    setPreview(fresh.preview);
+    setImportError(fresh.importError);
+    setSelectedKeys(fresh.selectedKeys);
+    setAssignedBlocks(fresh.assignedBlocks);
+    setBlockAssignSelections(fresh.blockAssignSelections);
+    setClearing(true);
+    await enqueueProfileWrite(async () => {
+      try {
+        await api.saveProfile(cleared);
+        toast.success("已清空全部履历");
+      } catch (error) {
+        // 本地已显示空档案，但后端写入失败仍是旧数据——回读恢复，避免 UI 与服务端静默分叉
+        try {
+          const payload = await api.profile();
+          setProfile({ ...emptyProfile, ...payload });
+        } catch {
+          // 回读也失败：保持当前空档案显示，等待用户下次操作或重进页面纠正
+        }
+        toast.error(error instanceof Error ? error.message : "清空失败，请检查网络后重试");
+      } finally {
+        setClearing(false);
+      }
+    });
   }
 
   async function handleImportFile(event: React.ChangeEvent<HTMLInputElement>) {
@@ -640,6 +716,16 @@ export function ProfilePage() {
           <button className="primary-button" onClick={save}>
             <Save size={17} />
             {saved ? "已保存" : "保存"}
+          </button>
+          <button
+            className="icon-text-button danger-button"
+            onClick={() => setClearConfirm(true)}
+            disabled={profileIsEmpty(profile) || clearing}
+            title="删除已填写的全部履历信息"
+          >
+            <Trash2 size={17} />
+            {clearing ? <ButtonSpinner /> : null}
+            {clearing ? "清空中..." : "清空"}
           </button>
         </div>
       </div>
@@ -895,9 +981,9 @@ export function ProfilePage() {
 
       {deleteConfirm && (
         <div className={`dialog-overlay${deleteExiting ? " exiting" : ""}`} onClick={closeDeleteDialog}>
-          <div className={`dialog small${deleteExiting ? " exiting" : ""}`} onClick={(e) => e.stopPropagation()}>
+          <div className={`dialog small${deleteExiting ? " exiting" : ""}`} onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="profile-dialog-delete-title">
             <div className="dialog-header">
-              <h2>确认删除</h2>
+              <h2 id="profile-dialog-delete-title">确认删除</h2>
             </div>
             <div className="dialog-body">
               <p className="subtle">{formatDeleteWarning(deleteConfirm.count)}</p>
@@ -919,9 +1005,9 @@ export function ProfilePage() {
 
       {overlapConfirm && (
         <div className={`dialog-overlay${overlapExiting ? " exiting" : ""}`} onClick={closeOverlapDialog}>
-          <div className={`dialog small${overlapExiting ? " exiting" : ""}`} onClick={(e) => e.stopPropagation()}>
+          <div className={`dialog small${overlapExiting ? " exiting" : ""}`} onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="profile-dialog-overlap-title">
             <div className="dialog-header">
-              <h2>时间重叠提示</h2>
+              <h2 id="profile-dialog-overlap-title">时间重叠提示</h2>
             </div>
             <div className="dialog-body">
               <p className="subtle">{formatOverlapWarning()}</p>
@@ -943,9 +1029,9 @@ export function ProfilePage() {
 
       {demoLoadConfirm && (
         <div className="dialog-overlay">
-          <div className="dialog small">
+          <div className="dialog small" role="dialog" aria-modal="true" aria-labelledby="profile-dialog-demo-load-title">
             <div className="dialog-header">
-              <h2>载入演示数据？</h2>
+              <h2 id="profile-dialog-demo-load-title">载入演示数据？</h2>
             </div>
             <div className="dialog-body">
               <p className="subtle">
@@ -966,9 +1052,9 @@ export function ProfilePage() {
 
       {demoSaveConfirm && (
         <div className="dialog-overlay">
-          <div className="dialog small">
+          <div className="dialog small" role="dialog" aria-modal="true" aria-labelledby="profile-dialog-demo-save-title">
             <div className="dialog-header">
-              <h2>演示数据将被保存为正式档案</h2>
+              <h2 id="profile-dialog-demo-save-title">演示数据将被保存为正式档案</h2>
             </div>
             <div className="dialog-body">
               <p className="subtle">
@@ -981,6 +1067,30 @@ export function ProfilePage() {
               </button>
               <button className="primary-button" onClick={() => { setDemoSaveConfirm(false); void runSaveChecks(); }}>
                 仍要保存
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {clearConfirm && (
+        <div className="dialog-overlay" onClick={() => setClearConfirm(false)}>
+          <div className="dialog small" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="profile-dialog-clear-title">
+            <div className="dialog-header">
+              <h2 id="profile-dialog-clear-title">清空全部履历？</h2>
+            </div>
+            <div className="dialog-body">
+              <p className="subtle">
+                将删除基本信息与全部经历条目（教育 / 工作 / 项目 / 论文 / 教学 / 获奖 /
+                证书 / 技能 / 语言），并立即保存为空档案，此操作不可恢复。已生成的简历草稿与导出文件不受影响。
+              </p>
+            </div>
+            <div className="dialog-actions">
+              <button className="text-button" onClick={() => setClearConfirm(false)}>
+                取消
+              </button>
+              <button className="primary-button" onClick={confirmClearProfile}>
+                确认清空
               </button>
             </div>
           </div>
