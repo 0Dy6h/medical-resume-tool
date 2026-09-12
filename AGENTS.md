@@ -32,10 +32,13 @@ cd backend; uv run --project . python -m uvicorn app.main:app --host 127.0.0.1 -
 > `scripts/start-local.ps1`）；`pwsh -NoProfile -File scripts/start-local.ps1`
 > （`-Stop` 停止，`-NoBrowser` 不自动开浏览器）；或全局命令 `tcmjob` / `tcmjob-stop`
 > （任意目录可用，Ctrl+C/关窗由看门狗自动停全套服务，机制见 `scripts/README-tcmjob.md`）。
+> `start-local.ps1` 必须用 `pwsh` 跑：Windows PowerShell 5.1 解析该中文 UTF-8 无 BOM
+> 脚本会报「字符串缺少终止符」。经 `pwsh -File` 后台拉起时任务会一直显示 running，
+> 勿等其退出，直接探活 `/health` 等端点确认。
 > 若要改动 `scripts/*.bat` 或 `D:\bin\tcmjob*.bat`：bat 必须保存为 **GBK 编码 + CRLF**，
 > 等待用 `ping -n` 而非 `timeout`（本机 PATH 中 GNU coreutils 的 timeout 会抢占 Windows 版）。
 
-> **SQLite path note:** the database path is relative to the current working directory. From the repo root it uses `data/app.db`; from `backend/` it uses `backend/data/app.db`. The two paths do not share data.
+> **SQLite path note:** the database path is relative to the current working directory. From the repo root it uses `data/app.db`; from `backend/` it uses `backend/data/app.db`. The two paths do not share data. The live database is `backend/data/app.db` (services run from `backend/`); the root `data/app.db` is a stale leftover from an earlier CWD convention — inspect only the backend one for current data, read-only (`mode=ro`) for spot checks.
 
 Frontend:
 
@@ -89,6 +92,7 @@ pnpm dev
 - `frontend/src/pages/` - workbench pages (tests live alongside as `*.test.ts`).
 - `backend/scripts/` - offline utilities run from `backend/`: `build_idf.py` (IDF table), `export_preview.py`, `measure_jobs_layout.py`, `cleanup_test_accounts.py` (deletes accumulated trial/probe accounts from the db in FK-safe order; dry-run by default, `--apply` auto-backs-up the db file first, only touches accounts matching test naming patterns such as `trial_*` / `verify*` / `smoke_*` unless `--also` names them explicitly).
 - `scripts/` (repo root) - local dev tooling: `start-local.ps1` + `tcmjob*.bat` start/stop wrappers (see Commands), `README-tcmjob.md` mechanism doc, and `md_to_docx.py` (one-shot markdown→docx converter that regenerated `docs/beta-announcement.docx`; input/output paths hardcoded in its `__main__` — not part of the app).
+- `logs/` (repo root) - runtime logs (`backend.log`, `backend.err.log`) plus ad-hoc probe screenshots. Check here first when verifying what a running service did; access-log lines double as evidence that a previous probe actually hit the server.
 - `medical-job-prd/` - self-contained product PRD (static HTML, no build step).
 - `check_syntax.py` (repo root) - trial-remediation scratch tool that `py_compile`-checks recently modified backend files; not part of the app.
 - `docs/handoffs/` - session continuation notes.
