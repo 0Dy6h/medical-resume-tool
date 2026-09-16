@@ -1,5 +1,68 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { api, parseContentDispositionFilename } from "./api";
+import { api, getToken, setToken, setUnauthorizedHandler, parseContentDispositionFilename, SessionChangedError, UnauthorizedError } from "./api";
+
+describe("session responses", () => {
+  afterEach(() => {
+    setUnauthorizedHandler(null);
+    vi.unstubAllGlobals();
+  });
+
+  function storage(token: string | null = "account-a") {
+    let current = token;
+    vi.stubGlobal("localStorage", {
+      getItem: () => current,
+      setItem: (_: string, value: string) => { current = value; },
+      removeItem: () => { current = null; }
+    });
+  }
+
+  it("a delayed 401 from account A cannot log account B out", async () => {
+    storage();
+    const logout = vi.fn();
+    setUnauthorizedHandler(logout);
+    let respond!: (value: Response) => void;
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>((resolve) => { respond = resolve; })));
+    const pending = api.profile();
+    setToken("account-b");
+    respond(new Response('{"detail":"expired"}', { status: 401 }));
+    await expect(pending).rejects.toBeInstanceOf(UnauthorizedError);
+    expect(getToken()).toBe("account-b");
+    expect(logout).not.toHaveBeenCalled();
+  });
+
+  it("rejects the previous account's successful response after a switch", async () => {
+    storage();
+    let respond!: (value: Response) => void;
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>((resolve) => { respond = resolve; })));
+    const pending = api.profile();
+    setToken("account-b");
+    respond(new Response('{"basics":{"name":"account-a-private"}}'));
+    await expect(pending).rejects.toBeInstanceOf(SessionChangedError);
+  });
+
+  it("checks the account again after response body decoding", async () => {
+    storage();
+    let decode!: (value: string) => void;
+    const response = new Response();
+    response.text = () => new Promise((resolve) => { decode = resolve; });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response));
+    const pending = api.profile();
+    await vi.waitFor(() => expect(decode).toBeTypeOf("function"));
+    setToken("account-b");
+    decode('{"basics":{"name":"account-a-private"}}');
+    await expect(pending).rejects.toBeInstanceOf(SessionChangedError);
+  });
+
+  it("invalidates the current expired token once", async () => {
+    storage();
+    const logout = vi.fn();
+    setUnauthorizedHandler(logout);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null, { status: 401 })));
+    await expect(api.profile()).rejects.toBeInstanceOf(UnauthorizedError);
+    expect(getToken()).toBeNull();
+    expect(logout).toHaveBeenCalledTimes(1);
+  });
+});
 
 describe("request — 204/空响应体处理", () => {
   afterEach(() => {

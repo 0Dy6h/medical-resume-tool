@@ -71,7 +71,7 @@ export default function App() {
         cancelAnimationFrame(rafRef.current);
       }
     };
-  }, []);
+  }, [auth.token]);
 
   if (!auth.token) {
     return <LoginPage />;
@@ -82,7 +82,7 @@ export default function App() {
   const minePages = pages.filter((p) => p.group === "mine");
 
   return (
-    <div className="app-shell">
+    <div key={auth.token} className="app-shell">
       <aside className="sidebar">
         <div className="brand">
           <div className="brand-mark"><Activity size={22} /></div>

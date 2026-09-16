@@ -52,7 +52,8 @@ def crawl_and_wait(client: TestClient, institution_ids: list[int], timeout: floa
         "/api/crawl-runs", json={"institution_ids": institution_ids}, headers=_crawl_headers(client)
     )
     assert run.status_code == 201
-    assert run.json()["status"] == "running"
+    # A fixture worker can finish before the POST response is serialized.
+    assert run.json()["status"] in {"running", "completed", "partial", "failed"}
     return wait_for_run(client, run.json()["id"], timeout)
 
 

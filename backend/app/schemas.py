@@ -1,9 +1,39 @@
 from __future__ import annotations
 
 from datetime import date
+import re
 from typing import Any, Literal, Self
 
-from pydantic import BaseModel, Field, ValidationError, field_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
+
+
+_INVALID_DOCUMENT_TEXT = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\ud800-\udfff\ufffe\uffff]")
+
+
+def _check_document_text(value: Any, _depth: int = 0, _budget: list[int] | None = None) -> Any:
+    if _depth > 12:
+        raise ValueError("内容结构过于复杂")
+    if _budget is None:
+        _budget = [0]
+    if isinstance(value, str):
+        if _INVALID_DOCUMENT_TEXT.search(value):
+            raise ValueError("内容包含无法导出的控制字符，请删除后重试")
+        if len(value) > 20_000:
+            raise ValueError("单项内容过长，请拆分后重试")
+        _budget[0] += len(value)
+        if _budget[0] > 500_000:
+            raise ValueError("内容总量过大，请拆分后重试")
+    elif isinstance(value, dict):
+        if len(value) > 100:
+            raise ValueError("内容字段过多")
+        for item in value.values():
+            _check_document_text(item, _depth + 1, _budget)
+    elif isinstance(value, list):
+        if len(value) > 500:
+            raise ValueError("条目过多，请拆分后重试")
+        for item in value:
+            _check_document_text(item, _depth + 1, _budget)
+    return value
 
 
 # ── Profile sub-models ───────────────────────────────────────────────
@@ -415,6 +445,11 @@ class ProfilePayload(BaseModel):
     languages: list[Language] = Field(default_factory=list)
     mode: Literal["fresh_grad", "experienced"] = "experienced"
 
+    @model_validator(mode="before")
+    @classmethod
+    def check_exportable_content(cls, value: Any) -> Any:
+        return _check_document_text(value)
+
     def to_profile(self) -> Profile:
         """Convert this payload into a fully typed ``Profile``.
 
@@ -483,7 +518,7 @@ _VALID_DECISIONS = ("adopt", "edit", "remove")
 
 
 class ResumeDraftUpdate(BaseModel):
-    sections: list[dict[str, Any]]
+    sections: list[dict[str, Any]] = Field(max_length=50)
 
     @field_validator("sections")
     @classmethod
@@ -493,8 +528,18 @@ class ResumeDraftUpdate(BaseModel):
         sections 是自由 dict,没有这里的前置校验,任意字符串（如 "maybe"）
         会被原样入库并回显,审阅生命周期与导出守卫都无法解释它。
         """
+        _check_document_text(v)
         for section in v:
-            for item in section.get("items") or []:
+            if not isinstance(section.get("id"), str) or not isinstance(section.get("title"), str):
+                raise ValueError("简历板块必须包含文本形式的 id 和 title")
+            items = section.get("items")
+            if not isinstance(items, list):
+                raise ValueError("简历板块的 items 必须是条目列表")
+            for item in items:
+                if not isinstance(item, dict) or not isinstance(item.get("text"), str):
+                    raise ValueError("简历条目必须包含文本形式的 text")
+                if item.get("profile_field_id") is not None and not isinstance(item["profile_field_id"], str):
+                    raise ValueError("档案证据引用必须是文本")
                 decision = item.get("decision")
                 if decision is not None and decision not in _VALID_DECISIONS:
                     raise ValueError(
@@ -569,7 +614,7 @@ def _is_int_like(value: Any) -> bool:
 
 
 class ReportCreate(BaseModel):
-    title: str = "医疗岗位市场分析报告"
+    title: str = Field(default="医疗岗位市场分析报告", max_length=200)
     filters: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("title")
@@ -594,11 +639,16 @@ class ReportCreate(BaseModel):
         if unknown:
             raise ValueError(f"不支持的筛选字段：{', '.join(unknown)}")
         trust = v.get("trust")
-        if trust is not None and trust not in _TRUST_FILTER_VALUES:
+        if trust is not None and (not isinstance(trust, str) or trust not in _TRUST_FILTER_VALUES):
             raise ValueError("trust 仅支持 real/placeholder/fixture/disabled")
         institution_id = v.get("institution_id")
         if institution_id is not None and not _is_int_like(institution_id):
             raise ValueError("institution_id 必须是机构 ID 整数")
+        if institution_id is not None and not 1 <= int(institution_id) <= 2**63 - 1:
+            raise ValueError("institution_id 超出有效范围")
+        for key in _REPORT_FILTER_KEYS - {"trust", "institution_id", "fresh_days"}:
+            if v.get(key) is not None and (not isinstance(v[key], str) or len(v[key]) > 500):
+                raise ValueError(f"{key} 必须是 500 字以内的文本")
         fresh_days = v.get("fresh_days")
         if fresh_days is not None:
             if not _is_int_like(fresh_days):

@@ -413,6 +413,13 @@ def _appendix_body_sections(draft: dict[str, Any], body_sections: list[dict[str,
 # ─── Filename helpers (Task C) ────────────────────────────────────────
 
 
+def _filename_text(value: str) -> str:
+    """Clean a download name without changing any resume content."""
+    text = re.sub(r"[\x00-\x1f\x7f-\x9f]", " ", value)
+    text = re.sub(r'[<>:"/\\|?*]', "_", text)
+    return re.sub(r"\s+", " ", text).strip(" ._")
+
+
 def build_export_filename(draft: dict[str, Any], ext: str, mode: str = "application") -> str:
     """Build a human-readable export filename.
 
@@ -424,11 +431,14 @@ def build_export_filename(draft: dict[str, Any], ext: str, mode: str = "applicat
         if section.get("id") == "identity":
             items = section.get("items", [])
             if items:
-                name = str(items[0].get("text", "")).strip()
+                # The identity editor accepts multiple lines; only its first
+                # nonempty line belongs in the downloadable filename.
+                lines = str(items[0].get("text", "")).splitlines()
+                name = next((_filename_text(line) for line in lines if _filename_text(line)), "")
             break
 
     title = str(draft.get("title", ""))
-    job_title = title.replace(" 定制简历", "").strip() if " 定制简历" in title else ""
+    job_title = _filename_text(title.replace(" 定制简历", "")) if " 定制简历" in title else ""
 
     today = datetime.now().strftime("%Y%m%d")
 
@@ -440,12 +450,13 @@ def build_export_filename(draft: dict[str, Any], ext: str, mode: str = "applicat
     if mode == "diagnostic":
         filename += "-诊断版"
 
-    return f"{filename}.{ext}"
+    return _filename_text(f"{filename}.{ext}")
 
 
 def content_disposition_header(filename: str) -> str:
     """Build a Content-Disposition header with RFC 5987 ``filename*``."""
-    ascii_name = filename.encode("ascii", "replace").decode("ascii")
+    filename = _filename_text(filename) or "resume"
+    ascii_name = filename.encode("ascii", "replace").decode("ascii").replace("?", "_")
     encoded = quote(filename, safe="")
     return f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{encoded}"
 

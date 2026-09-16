@@ -9,6 +9,9 @@ from typing import Annotated
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.concurrency import run_in_threadpool
+
+from app.request_limits import RequestBodyLimitMiddleware
 
 from app.schemas import (
     AnalyticsSummary,
@@ -55,6 +58,7 @@ from app.services.repositories import (
     count_total_jobs_in_institutions,
     count_total_matching_jobs,
     count_unread_notifications,
+    complete_crawl_run,
     create_crawl_run,
     create_subscription,
     create_user,
@@ -103,6 +107,8 @@ from app.services.scheduler import DailyScheduler
 logger = logging.getLogger(__name__)
 
 DEFAULT_DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./data/app.db")
+MAX_REQUEST_BYTES = 50 * 1024 * 1024
+MAX_IMPORT_FILE_BYTES = 20 * 1024 * 1024
 
 
 def create_app(database_url: str | None = None) -> FastAPI:
@@ -129,14 +135,54 @@ def create_app(database_url: str | None = None) -> FastAPI:
             scheduler.stop()
 
     app = FastAPI(title="医疗岗位情报与真实简历定制工具", version="0.1.0", lifespan=lifespan)
+    app.add_middleware(RequestBodyLimitMiddleware, max_bytes=MAX_REQUEST_BYTES)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=["Content-Disposition"],
     )
     app.state.engine = engine
+
+    def launch_crawl(institutions_to_crawl: list[dict]) -> dict:
+        if not try_acquire_crawl_slot():
+            raise HTTPException(status_code=409, detail="已有抓取任务在进行中，请等待完成后再启动")
+        run_id = None
+
+        def mark_failed() -> None:
+            if run_id is not None:
+                try:
+                    complete_crawl_run(
+                        engine, run_id, success_count=0, failure_count=len(institutions_to_crawl),
+                        errors=[{"error_type": "worker_failure", "error": "抓取执行异常，请重试"}],
+                    )
+                except Exception:
+                    logger.exception("无法记录抓取异常 run_id=%s", run_id)
+
+        def crawl_then_scan() -> None:
+            try:
+                execute_crawl_run(engine, run_id, institutions_to_crawl, config.crawl_delay_seconds)
+            except Exception:
+                logger.exception("抓取执行异常 run_id=%s", run_id)
+                mark_failed()
+            finally:
+                release_crawl_slot()
+            try:
+                scan_subscriptions(engine, datetime.now(timezone.utc))
+            except Exception:
+                logger.exception("抓取后订阅扫描异常 run_id=%s", run_id)
+
+        try:
+            run_id = create_crawl_run(engine, [item["id"] for item in institutions_to_crawl], trigger="manual")
+            threading.Thread(target=crawl_then_scan, name=f"resume-crawl-{run_id}", daemon=True).start()
+        except Exception:
+            mark_failed()
+            release_crawl_slot()
+            logger.exception("无法启动抓取任务")
+            raise HTTPException(status_code=503, detail="抓取任务暂时无法启动，请稍后重试") from None
+        return get_crawl_run(engine, run_id)
 
     @app.get("/health")
     def health() -> dict[str, str]:
@@ -208,28 +254,10 @@ def create_app(database_url: str | None = None) -> FastAPI:
         user: Annotated[dict, Depends(get_current_user)],
     ) -> dict:
         """B1 一键重跑：对单个机构立即触发一次抓取（与手动抓取同样的单飞约束）。"""
-        from app.config import config
-        from app.services.crawler import release_crawl_slot, try_acquire_crawl_slot
-
         institutions_to_crawl = get_institutions_by_ids(engine, [institution_id])
         if not institutions_to_crawl or not institutions_to_crawl[0]["enabled"]:
             raise HTTPException(status_code=400, detail="该机构不存在或尚未适配，无法抓取")
-        if not try_acquire_crawl_slot():
-            raise HTTPException(status_code=409, detail="已有抓取任务在进行中，请等待完成后再试")
-
-        run_id = create_crawl_run(engine, [institution_id], trigger="manual")
-
-        def _crawl_then_scan() -> None:
-            try:
-                execute_crawl_run(
-                    engine, run_id, institutions_to_crawl, config.crawl_delay_seconds
-                )
-            finally:
-                release_crawl_slot()
-                scan_subscriptions(engine, datetime.now(timezone.utc))
-
-        threading.Thread(target=_crawl_then_scan, daemon=True).start()
-        return get_crawl_run(engine, run_id)
+        return launch_crawl(institutions_to_crawl)
 
     @app.post("/api/crawl-runs", response_model=CrawlRunOut, status_code=201)
     def start_crawl(
@@ -260,24 +288,7 @@ def create_app(database_url: str | None = None) -> FastAPI:
                     inst["id"], inst["name"], reason,
                 )
 
-        # 单飞：手动与自动抓取互斥，避免并发跑批互相干扰或重复入库。
-        if not try_acquire_crawl_slot():
-            raise HTTPException(status_code=409, detail="已有抓取任务在进行中，请等待完成后再启动")
-
-        run_id = create_crawl_run(engine, [item["id"] for item in adapted_institutions], trigger="manual")
-
-        def _crawl_then_scan() -> None:
-            try:
-                execute_crawl_run(
-                    engine, run_id, adapted_institutions, config.crawl_delay_seconds
-                )
-            finally:
-                release_crawl_slot()
-                scan_subscriptions(engine, datetime.now(timezone.utc))
-
-        thread = threading.Thread(target=_crawl_then_scan, daemon=True)
-        thread.start()
-        return get_crawl_run(engine, run_id)
+        return launch_crawl(adapted_institutions)
 
     @app.get("/api/crawl-runs", response_model=list[CrawlRunOut])
     def crawl_runs(
@@ -455,12 +466,17 @@ def create_app(database_url: str | None = None) -> FastAPI:
         user: Annotated[dict, Depends(get_current_user)],
         file: UploadFile,
     ) -> dict:
-        content = await file.read()
         try:
-            extraction = extract_profile_text(file.filename or "", content)
+            content = await file.read(MAX_IMPORT_FILE_BYTES + 1)
+        finally:
+            await file.close()
+        if len(content) > MAX_IMPORT_FILE_BYTES:
+            raise HTTPException(status_code=413, detail="资料文件过大，请选择 20 MB 以内的文件")
+        try:
+            extraction = await run_in_threadpool(extract_profile_text, file.filename or "", content)
         except ProfileImportError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from None
-        contract = build_profile_contract(extraction.lines, extraction.warnings)
+        contract = await run_in_threadpool(build_profile_contract, extraction.lines, extraction.warnings)
         return contract.to_dict()
 
     @app.get("/api/resume-drafts", response_model=list[ResumeDraftSummaryOut])

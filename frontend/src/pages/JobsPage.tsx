@@ -111,6 +111,12 @@ export function JobsPage({ onNavigate }: { onNavigate: (page: string) => void })
   const [generatingDraft, setGeneratingDraft] = useState(false);
   const [isDesktop, setIsDesktop] = useState(true);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [statusSaving, setStatusSaving] = useState(false);
+  const statusWriteRef = useRef(false);
+  const listVersion = useRef(0);
+  const detailVersion = useRef(0);
+  const detailRef = useRef(detail);
+  detailRef.current = detail;
   // 真实视图为空时探测演示数据：断网首启/真实源全挂时，库里的 fixture 样本
   // 会被默认「真实数据」筛选藏住，用户会误以为岗位库是空的。
   const [fixtureAvailable, setFixtureAvailable] = useState(false);
@@ -128,6 +134,8 @@ export function JobsPage({ onNavigate }: { onNavigate: (page: string) => void })
   }, []);
 
   async function refresh(targetPage = page) {
+    const version = ++listVersion.current;
+    const selectedVersion = detailVersion.current;
     setLoading(true);
     try {
       const payload = await api.jobs({
@@ -141,6 +149,7 @@ export function JobsPage({ onNavigate }: { onNavigate: (page: string) => void })
         limit: PAGE_SIZE,
         offset: targetPage * PAGE_SIZE,
       });
+      if (version !== listVersion.current) return;
       setJobs(payload.items);
       setTotal(payload.total);
       setPage(targetPage);
@@ -151,26 +160,31 @@ export function JobsPage({ onNavigate }: { onNavigate: (page: string) => void })
       ) {
         try {
           const probe = await api.jobs({ trust: "fixture", limit: 1 });
+          if (version !== listVersion.current) return;
           setFixtureAvailable(probe.total > 0);
         } catch {
-          setFixtureAvailable(false);
+          if (version === listVersion.current) setFixtureAvailable(false);
         }
       } else {
         setFixtureAvailable(false);
       }
-      const plan = planDetailSync(detail?.id ?? null, payload.items);
+      if (version !== listVersion.current || selectedVersion !== detailVersion.current) return;
+      const plan = planDetailSync(detailRef.current?.id ?? null, payload.items);
       if (plan.clear) {
+        detailVersion.current += 1;
         setDetail(null);
         syncStatusForm(null);
       } else if (plan.loadFirst) {
+        const detailRequest = ++detailVersion.current;
         const firstDetail = await api.job(payload.items[0].id);
+        if (version !== listVersion.current || detailRequest !== detailVersion.current) return;
         setDetail(firstDetail);
         syncStatusForm(firstDetail);
       }
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "加载岗位失败");
+      if (version === listVersion.current) toast.error(error instanceof Error ? error.message : "加载岗位失败");
     } finally {
-      setLoading(false);
+      if (version === listVersion.current) setLoading(false);
     }
   }
 
@@ -179,14 +193,16 @@ export function JobsPage({ onNavigate }: { onNavigate: (page: string) => void })
   }
 
   async function selectJob(job: Job, rowEl?: HTMLElement) {
+    const version = ++detailVersion.current;
     if (rowEl) triggerRef.current = rowEl;
     try {
       const payload = await api.job(job.id);
+      if (version !== detailVersion.current) return;
       setDetail(payload);
       syncStatusForm(payload);
       if (!isDesktop) setDrawerOpen(true);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "加载岗位详情失败");
+      if (version === detailVersion.current) toast.error(error instanceof Error ? error.message : "加载岗位详情失败");
     }
   }
 
@@ -197,31 +213,41 @@ export function JobsPage({ onNavigate }: { onNavigate: (page: string) => void })
   }
 
   async function saveStatus() {
-    if (!detail) return;
+    if (!detail || statusWriteRef.current) return;
+    statusWriteRef.current = true;
+    setStatusSaving(true);
     try {
       const userStatus = await api.saveJobStatus(detail.id, {
         status: statusValue,
         note: statusNote.trim() || null,
         deadline: statusDeadline.trim() || null
       });
-      setDetail({ ...detail, user_status: userStatus });
+      setDetail((current) => current?.id === detail.id ? { ...current, user_status: userStatus } : current);
       setJobs((current) => current.map((job) => (job.id === detail.id ? { ...job, user_status: userStatus } : job)));
       toast.success("岗位状态已保存");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "保存岗位状态失败");
+    } finally {
+      statusWriteRef.current = false;
+      setStatusSaving(false);
     }
   }
 
   async function clearStatus() {
-    if (!detail) return;
+    if (!detail || statusWriteRef.current) return;
+    statusWriteRef.current = true;
+    setStatusSaving(true);
     try {
       await api.clearJobStatus(detail.id);
-      setDetail({ ...detail, user_status: null });
+      setDetail((current) => current?.id === detail.id ? { ...current, user_status: null } : current);
       setJobs((current) => current.map((job) => (job.id === detail.id ? { ...job, user_status: null } : job)));
-      syncStatusForm(null);
+      if (detailRef.current?.id === detail.id) syncStatusForm(null);
       toast.success("已清除岗位状态");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "清除岗位状态失败");
+    } finally {
+      statusWriteRef.current = false;
+      setStatusSaving(false);
     }
   }
 
@@ -556,11 +582,11 @@ export function JobsPage({ onNavigate }: { onNavigate: (page: string) => void })
               </div>
               <div className="button-row">
                 {/* Task C: 保存状态为次要操作，生成简历为主操作 */}
-                <button className="secondary-button" onClick={() => void saveStatus()}>
+                <button className="secondary-button" onClick={() => void saveStatus()} disabled={statusSaving}>
                   {detail.user_status ? <BookmarkCheck size={17} /> : <BookmarkPlus size={17} />}
                   保存状态
                 </button>
-                <button className="text-button" onClick={() => void clearStatus()} disabled={!detail.user_status}>
+                <button className="text-button" onClick={() => void clearStatus()} disabled={!detail.user_status || statusSaving}>
                   <X size={17} />
                   清除
                 </button>

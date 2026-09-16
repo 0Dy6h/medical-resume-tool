@@ -286,5 +286,5 @@ class TestBJMUAdapter:
         assert jobs[0].parser_name == "bjmu-notice-v1"
         failed = jobs[0].extraction_evidence["attachments"][0]
         assert failed["status"] == "failed"
-        assert "File is not a zip file" in failed["error"]
+        assert "文档压缩包" in failed["error"]
         assert all(job.parser_name != "bjmu-xlsx-v1" for job in jobs)

@@ -10,12 +10,15 @@ import os
 import re
 from dataclasses import dataclass, field
 from io import BytesIO
+from itertools import islice
 from pathlib import Path
 from typing import Any
 
 from docx import Document
 
 from app.services.classifier import normalize_text
+from app.services.document_limits import DocumentLimitError, check_ooxml_archive
+from app.services.image_limits import MAX_IMAGE_PIXELS, SUPPORTED_IMAGE_FORMATS
 
 
 SECTION_ALIASES: dict[str, list[str]] = {
@@ -42,7 +45,7 @@ _DATE_RANGE = re.compile(
 _YEAR = re.compile(r"(?:19|20)\d{2}")
 _YEAR_LEAD = re.compile(r"^\d{4}")
 _DOI = re.compile(r"10\.\d{4,9}/\S+")
-_JOURNAL = re.compile(r"《([^》]+)》")
+_JOURNAL = re.compile(r"《([^《》\r\n]{1,500})》")
 _DEGREE = re.compile(r"博士|硕士|学士|本科|大专")
 
 _SCHOOL_SUFFIXES = ["大学", "学院", "学校", "医学部"]
@@ -66,6 +69,9 @@ MAX_PDF_PAGES = int(os.getenv("PROFILE_IMPORT_MAX_PDF_PAGES", "20"))
 MAX_PDF_OCR_PAGES = int(os.getenv("PROFILE_IMPORT_MAX_PDF_OCR_PAGES", "3"))
 MAX_IMAGE_FRAMES = int(os.getenv("PROFILE_IMPORT_MAX_IMAGE_FRAMES", "5"))
 OCR_LANGUAGES = os.getenv("PROFILE_IMPORT_OCR_LANGUAGES", "chi_sim+eng")
+MAX_EXTRACTED_CHARS = 500_000
+MAX_EXTRACTED_LINES = 10_000
+MAX_LINE_CHARS = 10_000
 
 
 @dataclass
@@ -86,17 +92,27 @@ def extract_profile_text(filename: str, content: bytes) -> ProfileTextExtraction
     if not content:
         raise ProfileImportError("上传文件为空")
     if extension == ".docx":
-        return ProfileTextExtraction(extract_docx_text(content))
-    if extension == ".pdf":
-        return extract_pdf_text(content)
-    if extension in TEXT_EXTENSIONS:
+        result = ProfileTextExtraction(extract_docx_text(content))
+    elif extension == ".pdf":
+        result = extract_pdf_text(content)
+    elif extension in TEXT_EXTENSIONS:
         # markdown 标题标记在行式管线里没有语义，还会让「# 姓名」因前缀
         # 不满足纯中文姓名检测而被静默丢弃（docx 标题段落无此前缀，行为一致）。
-        return extract_plain_text(content, strip_markdown_headings=extension != ".txt")
-    return extract_image_text(content, filename or extension)
+        result = extract_plain_text(content, strip_markdown_headings=extension != ".txt")
+    else:
+        result = extract_image_text(content, filename or extension)
+    if (len(result.lines) > MAX_EXTRACTED_LINES
+            or sum(map(len, result.lines)) > MAX_EXTRACTED_CHARS
+            or any(len(line) > MAX_LINE_CHARS for line in result.lines)):
+        raise ProfileImportError("资料文本过长，请按履历板块拆分文件后导入")
+    return result
 
 
 def extract_docx_text(content: bytes) -> list[str]:
+    try:
+        check_ooxml_archive(content)
+    except DocumentLimitError as exc:
+        raise ProfileImportError(str(exc)) from exc
     try:
         document = Document(BytesIO(content))
     except Exception as exc:
@@ -145,6 +161,10 @@ def extract_pdf_text(content: bytes) -> ProfileTextExtraction:
             warnings.extend(ocr_warnings)
         if not any(normalize_text(line) for line in lines):
             warnings.append("PDF 中未提取到可识别文本；如果是扫描件，请确认本机已安装 Tesseract OCR")
+    except ProfileImportError:
+        raise
+    except Exception as exc:
+        raise ProfileImportError("无法解析该 PDF 文件，请确认文件未加密或损坏") from exc
     finally:
         document.close()
     return ProfileTextExtraction(lines=lines, warnings=_dedupe(warnings))
@@ -189,6 +209,9 @@ def _ocr_pdf_pages(document: Any, page_indexes: list[int]) -> tuple[list[str], l
     lines: list[str] = []
     for page_index in ocr_indexes:
         page = document.load_page(page_index)
+        if page.rect.width * page.rect.height * 4 > MAX_IMAGE_PIXELS:
+            warnings.append(f"PDF 第 {page_index + 1} 页尺寸过大，已跳过 OCR，请缩小页面后重试")
+            continue
         pixmap = page.get_pixmap(matrix=_pdf_ocr_matrix(), alpha=False)
         page_lines, page_warnings = _ocr_image_bytes(pixmap.tobytes("png"), source_label=f"PDF 第 {page_index + 1} 页")
         lines.extend(page_lines)
@@ -213,17 +236,21 @@ def _ocr_image_bytes(content: bytes, *, source_label: str) -> tuple[list[str], l
     if tesseract_cmd:
         pytesseract.pytesseract.tesseract_cmd = tesseract_cmd
     try:
-        image = Image.open(BytesIO(content))
+        image = Image.open(BytesIO(content), formats=SUPPORTED_IMAGE_FORMATS)
     except Exception as exc:
         raise ProfileImportError("无法读取该图片文件，请确认文件未损坏") from exc
 
     lines: list[str] = []
     warnings: list[str] = []
     try:
-        frames = list(ImageSequence.Iterator(image))[:MAX_IMAGE_FRAMES]
+        frame_count = min(getattr(image, "n_frames", 1), MAX_IMAGE_FRAMES)
         if getattr(image, "n_frames", 1) > MAX_IMAGE_FRAMES:
             warnings.append(f"{source_label} 包含多帧图片，仅 OCR 前 {MAX_IMAGE_FRAMES} 帧")
-        for index, frame in enumerate(frames, start=1):
+        # Pillow 迭代器复用同一 Image 对象；先 list 会让每项都指向末帧。
+        # 即取即识别，同时让帧数上限真正限制遍历与解码。
+        for index, frame in enumerate(islice(ImageSequence.Iterator(image), MAX_IMAGE_FRAMES), start=1):
+            if frame.width * frame.height > MAX_IMAGE_PIXELS:
+                raise ProfileImportError("图片像素过大，请缩小图片后重试")
             try:
                 prepared = ImageOps.exif_transpose(frame).convert("RGB")
             except Exception as exc:
@@ -236,8 +263,10 @@ def _ocr_image_bytes(content: bytes, *, source_label: str) -> tuple[list[str], l
                 break
             if normalize_text(text):
                 lines.extend(text.splitlines())
-                if len(frames) > 1 and index < len(frames):
+                if frame_count > 1 and index < frame_count:
                     lines.append("")
+    except ProfileImportError:
+        raise
     except Exception as exc:
         raise ProfileImportError("无法读取该图片文件，请确认文件未损坏") from exc
     finally:
@@ -247,10 +276,10 @@ def _ocr_image_bytes(content: bytes, *, source_label: str) -> tuple[list[str], l
 
 def _image_to_string(pytesseract_module: Any, image: Any) -> str:
     try:
-        return pytesseract_module.image_to_string(image, lang=OCR_LANGUAGES)
+        return pytesseract_module.image_to_string(image, lang=OCR_LANGUAGES, timeout=30)
     except Exception:
         if OCR_LANGUAGES != "eng":
-            return pytesseract_module.image_to_string(image, lang="eng")
+            return pytesseract_module.image_to_string(image, lang="eng", timeout=30)
         raise
 
 

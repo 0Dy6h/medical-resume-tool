@@ -101,6 +101,8 @@ pnpm dev
 
 Run backend tests after backend changes. Run `pnpm test`, `pnpm typecheck`, and `pnpm build` after frontend changes. For cross-stack behavior, start both services and verify `/health`, `/api/jobs`, `/api/analytics/summary`, and `http://127.0.0.1:5173`.
 
+Backend tests isolate `DATABASE_URL` and `DATA_DIR` in `tests/conftest.py` before importing `app.main`, whose default app otherwise initializes a database during test collection. Keep both scheduled scanning and automatic crawling disabled in this test fixture. Profile import accepts files up to 20 MB within a 50 MB streaming request cap; document/OCR extraction runs in the thread pool so it cannot block health checks or other requests. Consume Pillow image frames as an iterator: collecting the iterator first aliases the same mutable image object and repeats the last page.
+
 > Gotcha: pnpm 的 run 前依赖检查曾在本机非交互终端误报并试图清空重建 node_modules
 > （会把运行中的 Vite 一起干掉）。已在 `frontend/pnpm-workspace.yaml` 设
 > `verifyDepsBeforeRun: false`，`pnpm test/typecheck/build` 可直接运行；

@@ -1,5 +1,5 @@
 import { Activity, Database, FileText, LockKeyhole, LogIn, UserPlus } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { ButtonSpinner } from "../components/ButtonSpinner";
 import { useAuth } from "../components/AuthContext";
 import { useToast } from "../components/Toast";
@@ -22,8 +22,10 @@ export function LoginPage() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
+  const submitting = useRef(false);
 
   async function submit() {
+    if (submitting.current) return;
     if (mode === "register") {
       const usernameError = usernameValidationError(username);
       if (usernameError) {
@@ -38,6 +40,7 @@ export function LoginPage() {
       toast.error("请填写用户名和密码");
       return;
     }
+    submitting.current = true;
     setBusy(true);
     try {
       const result = mode === "login" ? await api.login(username.trim(), password) : await api.register(username.trim(), password);
@@ -46,6 +49,7 @@ export function LoginPage() {
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "操作失败");
     } finally {
+      submitting.current = false;
       setBusy(false);
     }
   }
@@ -84,11 +88,11 @@ export function LoginPage() {
             <p className="subtle">{mode === "login" ? "继续管理岗位样本与履历草稿" : "用于隔离你的履历和简历草稿"}</p>
           </div>
           <div className="auth-mode-switch" role="tablist" aria-label="账号操作">
-            <button className={mode === "login" ? "active" : ""} onClick={() => setMode("login")} type="button">
+            <button className={mode === "login" ? "active" : ""} onClick={() => setMode("login")} type="button" disabled={busy}>
               <LogIn size={15} />
               登录
             </button>
-            <button className={mode === "register" ? "active" : ""} onClick={() => setMode("register")} type="button">
+            <button className={mode === "register" ? "active" : ""} onClick={() => setMode("register")} type="button" disabled={busy}>
               <UserPlus size={15} />
               注册
             </button>
@@ -99,6 +103,8 @@ export function LoginPage() {
               <input
                 value={username}
                 autoComplete="username"
+                maxLength={32}
+                disabled={busy}
                 onChange={(event) => setUsername(event.target.value)}
                 onKeyDown={(event) => event.key === "Enter" && submit()}
                 placeholder="2-32 个字符"
@@ -108,6 +114,8 @@ export function LoginPage() {
               <span>密码</span>
               <input
                 type="password"
+                maxLength={128}
+                disabled={busy}
                 value={password}
                 autoComplete={mode === "login" ? "current-password" : "new-password"}
                 onChange={(event) => setPassword(event.target.value)}

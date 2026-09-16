@@ -18,6 +18,8 @@ from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
 
+from app.services.image_limits import MAX_IMAGE_PIXELS, SUPPORTED_IMAGE_FORMATS
+
 # 最多 OCR 的图片张数：条件表公告通常 1-2 张，防异常页面拖垮抓取时长。
 MAX_IMAGES = 4
 
@@ -55,13 +57,15 @@ def ocr_image_bytes(content: bytes) -> str | None:
     if tesseract_cmd:
         pytesseract.pytesseract.tesseract_cmd = tesseract_cmd
     try:
-        with Image.open(BytesIO(content)) as image:
+        with Image.open(BytesIO(content), formats=SUPPORTED_IMAGE_FORMATS) as image:
+            if image.width * image.height > MAX_IMAGE_PIXELS:
+                return None
             prepared = ImageOps.exif_transpose(image).convert("RGB")
             try:
-                text = pytesseract.image_to_string(prepared, lang=_OCR_LANGUAGES)
+                text = pytesseract.image_to_string(prepared, lang=_OCR_LANGUAGES, timeout=30)
             except Exception:
                 if _OCR_LANGUAGES != "eng":
-                    text = pytesseract.image_to_string(prepared, lang="eng")
+                    text = pytesseract.image_to_string(prepared, lang="eng", timeout=30)
                 else:
                     return None
     except Exception:

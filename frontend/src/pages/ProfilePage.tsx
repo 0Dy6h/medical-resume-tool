@@ -2,7 +2,7 @@ import { ChevronDown, FileUp, Plus, Save, Sparkles, Trash2 } from "lucide-react"
 import { useRef, useEffect, useState, useMemo } from "react";
 import { ButtonSpinner } from "../components/ButtonSpinner";
 import { useToast } from "../components/Toast";
-import { api } from "../lib/api";
+import { api, getToken } from "../lib/api";
 import { clearedProfile, demoProfile, emptyProfile, matchesDemoProfile, profileIsEmpty } from "../lib/defaultProfile";
 import { mergeImportSelection } from "../lib/importMerge";
 import { formatDeleteWarning, formatOverlapWarning, shouldShowDeleteWarning, shouldShowOverlapWarning } from "../lib/profileChecks";
@@ -322,6 +322,11 @@ function UnassignedBlockRow({
 export function ProfilePage() {
   const toast = useToast();
   const [profile, setProfile] = useState<Profile>(emptyProfile);
+  const [profileLoading, setProfileLoading] = useState(true);
+  const [profileLoadError, setProfileLoadError] = useState<string | null>(null);
+  const loadVersionRef = useRef(0);
+  const activeRef = useRef(true);
+  const ownerTokenRef = useRef(getToken());
   const [saved, setSaved] = useState(false);
   const [preview, setPreview] = useState<ProfileImportResult | null>(null);
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
@@ -352,7 +357,9 @@ export function ProfilePage() {
   const writeQueueRef = useRef<Promise<void>>(Promise.resolve());
 
   function enqueueProfileWrite(task: () => Promise<void>): Promise<void> {
-    const run = writeQueueRef.current.then(task);
+    const run = writeQueueRef.current.then(() => {
+      if (activeRef.current && getToken() === ownerTokenRef.current) return task();
+    });
     writeQueueRef.current = run.then(
       () => {},
       () => {}
@@ -370,13 +377,33 @@ export function ProfilePage() {
     }).filter((item): item is { config: CollectionConfig; defaultCollapsed: boolean } => item !== null);
   }, [currentMode]);
 
-  useEffect(() => {
-    api.profile().then((payload) => {
+  async function loadProfile() {
+    const version = ++loadVersionRef.current;
+    setProfileLoading(true);
+    setProfileLoadError(null);
+    try {
+      const payload = await api.profile();
+      if (!activeRef.current || version !== loadVersionRef.current) return;
       const loaded = { ...emptyProfile, ...payload };
       setProfile(loaded);
       const mode = loaded.mode ?? "experienced";
       setCollapsedSections(collapsedSetForMode(mode as "fresh_grad" | "experienced"));
-    });
+    } catch (error) {
+      if (activeRef.current && version === loadVersionRef.current) {
+        setProfileLoadError(error instanceof Error ? error.message : "加载履历失败");
+      }
+    } finally {
+      if (activeRef.current && version === loadVersionRef.current) setProfileLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    activeRef.current = true;
+    void loadProfile();
+    return () => {
+      activeRef.current = false;
+      loadVersionRef.current += 1;
+    };
   }, []);
 
   function toggleSection(key: string) {
@@ -427,9 +454,12 @@ export function ProfilePage() {
     await enqueueProfileWrite(async () => {
       try {
         // 执行时才读 profileRef：排队期间档案可能已被清空，落库内容必须与当前 UI 一致
-        await api.saveProfile(profileRef.current);
-        setSaved(true);
-        toast.success("履历已保存");
+        const snapshot = profileRef.current;
+        await api.saveProfile(snapshot);
+        if (!activeRef.current) return;
+        setSaved(profileRef.current === snapshot);
+        if (profileRef.current === snapshot) toast.success("履历已保存");
+        else toast.info("已保存提交时的履历，最新修改仍需保存");
         window.setTimeout(() => setSaved(false), 1600);
       } catch (error) {
         toast.error(error instanceof Error ? error.message : "保存失败");
@@ -462,7 +492,7 @@ export function ProfilePage() {
         // 本地已显示空档案，但后端写入失败仍是旧数据——回读恢复，避免 UI 与服务端静默分叉
         try {
           const payload = await api.profile();
-          setProfile({ ...emptyProfile, ...payload });
+          if (activeRef.current && profileRef.current === cleared) setProfile({ ...emptyProfile, ...payload });
         } catch {
           // 回读也失败：保持当前空档案显示，等待用户下次操作或重进页面纠正
         }
@@ -663,6 +693,17 @@ export function ProfilePage() {
       setOverlapExiting(false);
       void doSave();
     }, EXIT_DURATION);
+  }
+
+  if (profileLoading || profileLoadError) {
+    return <section className="panel form-panel" role="status">
+      <h1>我的履历</h1>
+      {profileLoading ? <p>正在加载已保存的履历…</p> : <>
+        <p>履历加载失败：{profileLoadError}</p>
+        <p className="subtle">恢复连接后重试，即可继续编辑已保存的内容。</p>
+        <button className="primary-button" onClick={() => void loadProfile()}>重新加载履历</button>
+      </>}
+    </section>;
   }
 
   return (

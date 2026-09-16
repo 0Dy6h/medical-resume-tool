@@ -13,14 +13,15 @@ from __future__ import annotations
 
 import ipaddress
 import socket
+import zlib
 from typing import Any
 from urllib.parse import urlsplit
 
+import anyio
+import httpcore
 import httpx
 
 MAX_RESPONSE_BYTES = 10 * 1024 * 1024  # 单次响应上限 10MB
-_DNS_CACHE: dict[str, list[str]] = {}
-_DNS_CACHE_LIMIT = 256
 
 
 class OutboundBlockedError(httpx.HTTPError):
@@ -32,37 +33,45 @@ class OutboundBlockedError(httpx.HTTPError):
 
 def assert_public_url(raw_url: str) -> None:
     """校验出站 URL：仅 http/https 且目标必须是公网地址。"""
-    parsed = urlsplit(raw_url)
+    try:
+        parsed = urlsplit(raw_url)
+        host = parsed.hostname
+        parsed.port  # Validate malformed/out-of-range ports before any connection.
+    except ValueError as exc:
+        raise OutboundBlockedError("无效的出站 URL") from exc
     if parsed.scheme not in ("http", "https"):
         raise OutboundBlockedError(f"仅允许 http/https 出站请求：{raw_url}")
-    host = parsed.hostname
     if not host:
         raise OutboundBlockedError(f"出站 URL 缺少主机名：{raw_url}")
+    if parsed.username is not None or parsed.password is not None:
+        raise OutboundBlockedError("出站 URL 不允许包含登录凭据")
     _assert_public_host(host)
 
 
-def _assert_public_host(host: str) -> None:
+def _assert_public_host(host: str) -> list[str]:
     try:
         ip = ipaddress.ip_address(host)
     except ValueError:
         ip = None
     if ip is not None:
         _assert_public_ip(ip, host)
-        return
+        return [str(ip)]
     resolved = _resolve_host(host)
     if not resolved:
         raise OutboundBlockedError(f"域名解析失败，拒绝出站：{host}")
     for ip_text in resolved:
         try:
             ip_obj = ipaddress.ip_address(ip_text)
-        except ValueError:
-            continue
+        except ValueError as exc:
+            raise OutboundBlockedError(f"域名解析返回无效地址：{host}") from exc
         _assert_public_ip(ip_obj, host)
+    return resolved
 
 
 def _assert_public_ip(ip: Any, host: str) -> None:
     if (
-        ip.is_private
+        not ip.is_global
+        or ip.is_private
         or ip.is_loopback
         or ip.is_link_local
         or ip.is_reserved
@@ -75,49 +84,116 @@ def _assert_public_ip(ip: Any, host: str) -> None:
 
 
 def _resolve_host(host: str) -> list[str]:
-    cached = _DNS_CACHE.get(host)
-    if cached is not None:
-        return cached
     try:
         infos = socket.getaddrinfo(host, None)
     except OSError:
         return []
     ips = sorted({info[4][0] for info in infos if info[4]})
-    if len(_DNS_CACHE) >= _DNS_CACHE_LIMIT:
-        _DNS_CACHE.clear()
-    _DNS_CACHE[host] = ips
     return ips
+
+
+class PublicNetworkBackend(httpcore.AnyIOBackend):
+    """Validate each new connection's DNS result and connect to that literal IP.
+
+    httpcore keeps the original hostname for Host and TLS/SNI. Passing only a
+    validated IP to the socket backend prevents a second DNS lookup from
+    rebinding a previously-public hostname to a private destination.
+    """
+
+    async def connect_tcp(self, host, port, timeout=None, local_address=None, socket_options=None):
+        addresses = await anyio.to_thread.run_sync(_assert_public_host, host)
+        last_error = None
+        for address in addresses:
+            try:
+                return await super().connect_tcp(
+                    address, port, timeout=timeout, local_address=local_address,
+                    socket_options=socket_options,
+                )
+            except (httpcore.ConnectError, httpcore.ConnectTimeout) as exc:
+                last_error = exc
+        if last_error is not None:
+            raise last_error
+        raise OutboundBlockedError(f"域名解析失败，拒绝出站：{host}")
+
+
+class PublicHTTPTransport(httpx.AsyncHTTPTransport):
+    def __init__(self):
+        # AsyncHTTPTransport's pool owns exception mapping and stream lifetime;
+        # the custom httpcore backend changes only how a socket is connected.
+        self._pool = httpcore.AsyncConnectionPool(
+            ssl_context=httpcore.default_ssl_context(),
+            network_backend=PublicNetworkBackend(),
+            max_connections=10,
+            max_keepalive_connections=5,
+        )
 
 
 async def guard_request(request: httpx.Request) -> None:
     """请求级安全钩子：出站前校验目标（重定向的每一跳都会经过）。"""
-    assert_public_url(str(request.url))
+    await anyio.to_thread.run_sync(assert_public_url, str(request.url))
 
 
 async def guard_response(response: httpx.Response) -> None:
-    """响应级安全钩子：Content-Length 预检 + 已下载字节兜底。
-
-    注意钩子触发时响应体往往尚未读入（is_stream_http_response），此时
-    response.content 会抛 ResponseNotRead——只能依赖 Content-Length 预检，
-    已读场景（无 Content-Length 的分块响应）再按实际字节兜底。
-    """
+    """Bound both wire bytes and decoded bytes before httpx buffers the body."""
     length_header = response.headers.get("content-length")
     if length_header:
         try:
             length = int(length_header)
         except ValueError:
             length = None
-        if length is not None and length > MAX_RESPONSE_BYTES:
+        if length is not None and (length < 0 or length > MAX_RESPONSE_BYTES):
+            await response.aclose()
             raise OutboundBlockedError(
                 f"响应过大（Content-Length={length} > {MAX_RESPONSE_BYTES}）"
             )
     try:
         body = response.content
     except httpx.ResponseNotRead:
-        # 流式响应尚未读入：交由 Content-Length 预检把关，读取阶段不再拦截
+        body = None
+    if body is not None:
+        if len(body) > MAX_RESPONSE_BYTES:
+            await response.aclose()
+            raise OutboundBlockedError(f"响应过大（{len(body)} 字节 > {MAX_RESPONSE_BYTES}）")
         return
-    if body and len(body) > MAX_RESPONSE_BYTES:
-        raise OutboundBlockedError(f"响应过大（{len(body)} 字节 > {MAX_RESPONSE_BYTES}）")
+
+    encoding = response.headers.get("content-encoding", "identity").strip().lower()
+    # Request identity, but safely handle common servers which still compress.
+    # zlib's max_length prevents one tiny compressed chunk allocating gigabytes.
+    if encoding not in ("", "identity", "gzip", "deflate"):
+        await response.aclose()
+        raise OutboundBlockedError(f"不支持安全解析的响应压缩格式：{encoding}")
+    decoder = zlib.decompressobj(16 + zlib.MAX_WBITS) if encoding == "gzip" else None
+    decoded = bytearray()
+    received = 0
+    try:
+        async for chunk in response.aiter_raw():
+            received += len(chunk)
+            if received > MAX_RESPONSE_BYTES:
+                raise OutboundBlockedError("响应过大（下载字节超限）")
+            if encoding == "deflate" and decoder is None and chunk:
+                decoder = zlib.decompressobj()
+                try:
+                    part = decoder.decompress(chunk, MAX_RESPONSE_BYTES - len(decoded) + 1)
+                except zlib.error:
+                    decoder = zlib.decompressobj(-zlib.MAX_WBITS)
+                    part = decoder.decompress(chunk, MAX_RESPONSE_BYTES - len(decoded) + 1)
+            else:
+                part = decoder.decompress(chunk, MAX_RESPONSE_BYTES - len(decoded) + 1) if decoder else chunk
+            if len(decoded) + len(part) > MAX_RESPONSE_BYTES or (decoder and decoder.unconsumed_tail):
+                raise OutboundBlockedError("响应过大（解压后字节超限）")
+            decoded.extend(part)
+        if decoder and (not decoder.eof or decoder.unused_data):
+            raise OutboundBlockedError("响应压缩数据不完整或包含额外内容")
+    except zlib.error as exc:
+        raise OutboundBlockedError("响应压缩数据损坏") from exc
+    finally:
+        await response.aclose()
+    # Response hooks are executed before AsyncClient.aread(); cache the bounded
+    # body just as Response.aread() does, without decoding it a second time.
+    response._content = bytes(decoded)
+    if encoding not in ("", "identity"):
+        response.headers.pop("content-encoding", None)
+        response.headers["content-length"] = str(len(decoded))
 
 
 def build_crawl_client() -> httpx.AsyncClient:
@@ -127,7 +203,9 @@ def build_crawl_client() -> httpx.AsyncClient:
     return httpx.AsyncClient(
         timeout=config.crawl_timeout,
         follow_redirects=True,
-        headers={"User-Agent": "MedicalJobMVP/0.1"},
+        headers={"User-Agent": "MedicalJobMVP/0.1", "Accept-Encoding": "identity"},
         verify=True,
+        trust_env=False,
+        transport=PublicHTTPTransport(),
         event_hooks={"request": [guard_request], "response": [guard_response]},
     )

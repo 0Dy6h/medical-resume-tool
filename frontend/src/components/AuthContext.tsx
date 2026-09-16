@@ -19,11 +19,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(() => {
     setToken(null);
     localStorage.removeItem(USERNAME_KEY);
+    localStorage.removeItem("pending_resume_draft_id");
     setTokenState(null);
     setUsername(null);
   }, []);
 
   const login = useCallback((nextToken: string, nextUsername: string) => {
+    localStorage.removeItem("pending_resume_draft_id");
     setToken(nextToken);
     localStorage.setItem(USERNAME_KEY, nextUsername);
     setTokenState(nextToken);
@@ -32,11 +34,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     // 任意请求收到 401 时清除登录态，回到登录页。
-    setUnauthorizedHandler(() => {
+    const unsubscribe = setUnauthorizedHandler(() => {
       localStorage.removeItem(USERNAME_KEY);
+      localStorage.removeItem("pending_resume_draft_id");
       setTokenState(null);
       setUsername(null);
     });
+    const syncStorage = (event: StorageEvent) => {
+      if (event.key === null || event.key === "auth_token" || event.key === USERNAME_KEY) {
+        setTokenState(getToken());
+        setUsername(localStorage.getItem(USERNAME_KEY));
+      }
+    };
+    window.addEventListener("storage", syncStorage);
+    return () => {
+      unsubscribe();
+      window.removeEventListener("storage", syncStorage);
+    };
   }, []);
 
   return <AuthContext.Provider value={{ token, username, login, logout }}>{children}</AuthContext.Provider>;

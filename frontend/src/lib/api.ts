@@ -29,6 +29,13 @@ export class UnauthorizedError extends Error {
   }
 }
 
+export class SessionChangedError extends Error {
+  constructor() {
+    super("登录账号已更改，请重试当前操作");
+    this.name = "SessionChangedError";
+  }
+}
+
 export function getToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
 }
@@ -40,39 +47,45 @@ export function setToken(token: string | null) {
 
 let onUnauthorized: (() => void) | null = null;
 
-export function setUnauthorizedHandler(handler: () => void) {
+export function setUnauthorizedHandler(handler: (() => void) | null) {
   onUnauthorized = handler;
+  return () => { if (onUnauthorized === handler) onUnauthorized = null; };
 }
 
-function authHeaders(extra?: HeadersInit): HeadersInit {
+async function send(path: string, options?: RequestInit) {
   const token = getToken();
-  return {
-    ...(extra ?? {}),
-    ...(token ? { Authorization: `Bearer ${token}` } : {})
-  };
+  const headers = new Headers(options?.headers);
+  const sendsToken = !["/api/auth/login", "/api/auth/register"].includes(path);
+  if (token && sendsToken) headers.set("Authorization", `Bearer ${token}`);
+  const response = await fetch(`${API_BASE}${path}`, { ...options, headers });
+  if (response.status === 401) {
+    // A late failure from the previous account must never sign out a new one.
+    if (sendsToken && token && getToken() === token) {
+      setToken(null);
+      onUnauthorized?.();
+    }
+    throw new UnauthorizedError(await errorMessage(response, "请先登录"));
+  }
+  function finish<T>(value: T): T {
+    if (getToken() !== token) throw new SessionChangedError();
+    return value;
+  }
+  finish(response);
+  return { response, finish };
 }
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, {
-    headers: {
-      "Content-Type": "application/json",
-      ...authHeaders(options?.headers)
-    },
-    ...options
-  });
-  if (response.status === 401) {
-    setToken(null);
-    onUnauthorized?.();
-    throw new UnauthorizedError(await errorMessage(response, "请先登录"));
-  }
+  const headers = new Headers(options?.headers);
+  if (options?.body != null && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
+  const { response, finish } = await send(path, { ...options, headers });
   if (!response.ok) {
     throw new Error(await errorMessage(response, `Request failed: ${response.status}`));
   }
   // 204 No Content（及约定外的空响应体）：直接返回 undefined，不再解析 JSON。
-  if (response.status === 204) return undefined as T;
+  if (response.status === 204) return finish(undefined as T);
   const text = await response.text();
-  if (!text) return undefined as T;
-  return JSON.parse(text) as T;
+  if (!text) return finish(undefined as T);
+  return finish(JSON.parse(text) as T);
 }
 
 async function errorMessage(response: Response, fallback: string): Promise<string> {
@@ -81,7 +94,7 @@ async function errorMessage(response: Response, fallback: string): Promise<strin
   try {
     const parsed = JSON.parse(text) as { detail?: unknown };
     if (typeof parsed.detail === "string") return parsed.detail;
-    if (Array.isArray(parsed.detail)) return parsed.detail.map((item) => String(item.msg ?? item)).join("；");
+    if (Array.isArray(parsed.detail)) return parsed.detail.map((item) => String(item?.msg ?? item)).join("；");
   } catch {
     return text;
   }
@@ -119,18 +132,7 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(payload)
     }),
-  clearJobStatus: async (jobId: number) => {
-    const response = await fetch(`${API_BASE}/api/jobs/${jobId}/status`, {
-      method: "DELETE",
-      headers: authHeaders()
-    });
-    if (response.status === 401) {
-      setToken(null);
-      onUnauthorized?.();
-      throw new UnauthorizedError();
-    }
-    if (!response.ok) throw new Error(await errorMessage(response, "清除状态失败"));
-  },
+  clearJobStatus: (jobId: number) => request<void>(`/api/jobs/${jobId}/status`, { method: "DELETE" }),
   crawlRun: (id: number) => request<CrawlRun>(`/api/crawl-runs/${id}`),
   crawlRuns: (limit = 10) => request<CrawlRun[]>(`/api/crawl-runs?limit=${limit}`),
   institutionsHealth: () =>
@@ -165,18 +167,12 @@ export const api = {
   importProfile: async (file: File) => {
     const form = new FormData();
     form.append("file", file);
-    const response = await fetch(`${API_BASE}/api/profile/import`, {
+    const { response, finish } = await send("/api/profile/import", {
       method: "POST",
-      headers: authHeaders(),
       body: form
     });
-    if (response.status === 401) {
-      setToken(null);
-      onUnauthorized?.();
-      throw new UnauthorizedError();
-    }
     if (!response.ok) throw new Error(await errorMessage(response, "导入失败"));
-    return (await response.json()) as ProfileImportResult;
+    return finish((await response.json()) as ProfileImportResult);
   },
   createResumeDraft: (jobId: number) =>
     request<ResumeDraft>("/api/resume-drafts", {
@@ -219,18 +215,12 @@ export const api = {
     override = false,
   ): Promise<{ blob: Blob; filename: string | null }> => {
     const params = new URLSearchParams({ format, mode, override: String(override) });
-    const response = await fetch(`${API_BASE}/api/resume-drafts/${draftId}/export?${params}`, {
-      method: "POST",
-      headers: authHeaders()
+    const { response, finish } = await send(`/api/resume-drafts/${draftId}/export?${params}`, {
+      method: "POST"
     });
-    if (response.status === 401) {
-      setToken(null);
-      onUnauthorized?.();
-      throw new UnauthorizedError();
-    }
     if (!response.ok) throw new Error(await errorMessage(response, "导出失败"));
     const filename = parseContentDispositionFilename(response.headers.get("Content-Disposition"));
-    return { blob: await response.blob(), filename };
+    return finish({ blob: await response.blob(), filename });
   }
 };
 
@@ -254,6 +244,8 @@ export function downloadBlob(blob: Blob, fileName: string) {
   const anchor = document.createElement("a");
   anchor.href = url;
   anchor.download = fileName;
+  document.body.appendChild(anchor);
   anchor.click();
-  URL.revokeObjectURL(url);
+  anchor.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }

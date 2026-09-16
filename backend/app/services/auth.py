@@ -101,7 +101,7 @@ def make_token(user_id: int, username: str, ttl: int = TOKEN_TTL_SECONDS) -> str
 
 def verify_token(token: str | None) -> dict | None:
     """校验签名与过期时间，有效则返回 payload，否则 None。"""
-    if not token or "." not in token:
+    if not isinstance(token, str) or not token or len(token) > 8192 or not token.isascii() or token.count(".") != 1:
         return None
     payload_b64, _, signature = token.partition(".")
     if not hmac.compare_digest(signature, _sign(payload_b64)):
@@ -112,6 +112,8 @@ def verify_token(token: str | None) -> dict | None:
         return None
     if not isinstance(payload, dict) or "uid" not in payload or "exp" not in payload:
         return None
-    if int(payload["exp"]) < int(time.time()):
+    if type(payload["uid"]) is not int or payload["uid"] <= 0:
+        return None
+    if type(payload["exp"]) is not int or payload["exp"] <= int(time.time()):
         return None
     return payload

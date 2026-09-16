@@ -76,6 +76,17 @@ def test_parse_xlsx_table_handles_empty_data_rows():
     assert rows[0].values["岗位名称"] == "临床医师"
 
 
+def test_blank_header_columns_do_not_shift_job_facts():
+    content = make_workbook_bytes([
+        ["", "岗位名称", "", "学历"],
+        ["装饰列", "科研助理", "备注列", "硕士"],
+    ])
+    rows = parse_xlsx_table(content)
+    assert rows[0].row_index == 2
+    assert rows[0].values == {"岗位名称": "科研助理", "学历": "硕士"}
+    assert "岗位名称：科研助理" in rows[0].raw_text
+
+
 def test_parse_xlsx_table_rejects_malformed_file():
     """非 xlsx 格式文件应抛出异常。"""
     import pytest

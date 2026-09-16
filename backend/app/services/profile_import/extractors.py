@@ -67,7 +67,12 @@ SKILL_TERMS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("伦理", re.compile(r"伦理")),
 )
 
-_CERTIFICATE_HINT = re.compile(r"执业医师|护士资格证|护士资格|GCP证书|GCP|规范化培训|计算机二级|证书")
+_CERTIFICATE_HINT = re.compile(r"执业医师|护士资格证|护士资格|规范化培训|计算机二级|证书|资格证")
+_NEGATED_OR_PLANNED = re.compile(
+    r"尚未|尚无|未曾|未(?:取得|获得|获取|完成|通过|掌握|学习|接触)|没有|不具备|不持有|"
+    r"不会|不熟悉|不了解|不掌握|不擅长|无(?:相关)?(?:经验|证书|资质)|计划|拟取得|准备|备考|报考|待考|待取得"
+)
+_FACT_CLAUSES = re.compile(r"[，,；;。\n]")
 _PROJECT_HINT = re.compile(r"项目|课题|队列|平台|基金")
 _PUBLICATION_HINT = re.compile(r"论文|发表|期刊|doi|DOI|《[^》]+》")
 _TEACHING_HINT = re.compile(r"教学|授课|带教|助教|课程")
@@ -107,7 +112,8 @@ def extract_skills(text: str) -> list[str]:
     """Extract canonical skill names from free text."""
     skills: list[str] = []
     for name, pattern in SKILL_TERMS:
-        if pattern.search(text) and name not in skills:
+        if any(pattern.search(clause) and not _NEGATED_OR_PLANNED.search(clause)
+               for clause in _FACT_CLAUSES.split(text)) and name not in skills:
             skills.append(name)
     return skills
 
@@ -262,7 +268,11 @@ def _is_award(text: str, block: DocumentBlock) -> bool:
 
 
 def _is_certificate(text: str, block: DocumentBlock) -> bool:
-    return block.section_hint == "certificates" or bool(_CERTIFICATE_HINT.search(text))
+    return any(
+        not _NEGATED_OR_PLANNED.search(clause)
+        and (block.section_hint == "certificates" or bool(_CERTIFICATE_HINT.search(clause)))
+        for clause in _FACT_CLAUSES.split(text) if clause.strip()
+    )
 
 
 def _is_language(text: str, block: DocumentBlock) -> bool:
@@ -322,8 +332,9 @@ def _project_fact(block: DocumentBlock, lines: list[str]) -> ExtractedFact:
 
 
 def _certificate_fact(block: DocumentBlock) -> ExtractedFact:
-    fields = _build_certificate(_certificate_source_text(block.text))
-    if re.search(r"GCP", block.text, re.I):
+    source = _certificate_source_text(block.text)
+    fields = _build_certificate(source)
+    if re.search(r"(?<![A-Za-z0-9])GCP(?![A-Za-z0-9])", source, re.I):
         fields["name"] = "GCP证书"
     return _scored_fact(
         "certificates",
@@ -453,9 +464,9 @@ def _project_inline_highlights(head: str, fields: dict[str, Any]) -> list[str]:
 
 
 def _certificate_source_text(text: str) -> str:
-    if re.search(r"GCP", text, re.I):
-        return "GCP证书"
-    return text
+    clauses = [clause.strip() for clause in _FACT_CLAUSES.split(text)
+               if clause.strip() and not _NEGATED_OR_PLANNED.search(clause)]
+    return next((clause for clause in clauses if _CERTIFICATE_HINT.search(clause)), " ".join(clauses))
 
 
 def _many_missing_fields(collection: str, fields: dict[str, Any]) -> bool:

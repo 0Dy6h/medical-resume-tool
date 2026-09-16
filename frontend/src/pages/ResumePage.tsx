@@ -1,8 +1,8 @@
 import { CheckCircle2, ChevronLeft, ChevronRight, Download, FileDown, History, ListChecks, Pencil, RefreshCcw, Save, Trash2, WandSparkles } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ButtonSpinner } from "../components/ButtonSpinner";
 import { useToast } from "../components/Toast";
-import { api, downloadBlob } from "../lib/api";
+import { api, downloadBlob, getToken } from "../lib/api";
 import { evidenceSourceLabel, evidenceStrengthLabel, evidenceStrengthTone } from "../lib/resumeEvidence";
 import type { Job, ResumeDraft, ResumeDraftSummary, ResumeSection } from "../types";
 
@@ -207,13 +207,23 @@ export function ResumePage({ onNavigate }: { onNavigate?: (page: string) => void
   const [currentIndex, setCurrentIndex] = useState(0);
   const [editing, setEditing] = useState(false);
   const [draftHistory, setDraftHistory] = useState<ResumeDraftSummary[]>([]);
+  const activeRef = useRef(true);
+  const ownerToken = useRef(getToken());
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+  const jobIdRef = useRef(jobId);
+  jobIdRef.current = jobId;
+  const selectionVersion = useRef(0);
+  const historyVersion = useRef(0);
+  const savingQueue = useRef<Promise<unknown>>(Promise.resolve());
+  const exportingRef = useRef(false);
 
   async function refreshJobs() {
     setJobsLoading(true);
     try {
       const payload = await api.jobs({ limit: JOB_DROPDOWN_LIMIT });
       setJobs(payload.items);
-      if (!jobId && payload.items[0]) setJobId(payload.items[0].id);
+      setJobId((current) => current || payload.items[0]?.id || "");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "加载岗位失败");
     } finally {
@@ -224,8 +234,10 @@ export function ResumePage({ onNavigate }: { onNavigate?: (page: string) => void
   async function loadPendingDraft() {
     const draftId = readPendingDraftId(localStorage);
     if (draftId == null) return;
+    const version = ++selectionVersion.current;
     try {
       const draft = await api.getResumeDraft(draftId);
+      if (!activeRef.current || version !== selectionVersion.current) return;
       localStorage.removeItem(PENDING_DRAFT_KEY);
       setDraft(draft);
       setJobId(draft.job_id);
@@ -233,26 +245,35 @@ export function ResumePage({ onNavigate }: { onNavigate?: (page: string) => void
       setCurrentIndex(0);
       setEditing(false);
     } catch (error) {
+      if (!activeRef.current || version !== selectionVersion.current) return;
       localStorage.removeItem(PENDING_DRAFT_KEY);
       toast.error(error instanceof Error ? error.message : "加载草稿失败");
     }
   }
 
   async function refreshDraftHistory(jobIdToFetch: number | "") {
+    const version = ++historyVersion.current;
     if (!jobIdToFetch) {
       setDraftHistory([]);
       return;
     }
     try {
-      setDraftHistory(await api.listResumeDrafts(Number(jobIdToFetch)));
+      const history = await api.listResumeDrafts(Number(jobIdToFetch));
+      if (activeRef.current && version === historyVersion.current) setDraftHistory(history);
     } catch {
-      setDraftHistory([]);
+      if (activeRef.current && version === historyVersion.current) setDraftHistory([]);
     }
   }
 
   useEffect(() => {
+    activeRef.current = true;
     void refreshJobs();
     void loadPendingDraft();
+    return () => {
+      activeRef.current = false;
+      selectionVersion.current += 1;
+      historyVersion.current += 1;
+    };
   }, []);
 
   useEffect(() => {
@@ -261,7 +282,8 @@ export function ResumePage({ onNavigate }: { onNavigate?: (page: string) => void
   }, [jobId]);
 
   async function generate() {
-    if (!jobId) return;
+    if (!jobId || loading || exportingRef.current) return;
+    const version = ++selectionVersion.current;
     // 同岗位重复生成按版本式保留（后端不改）；已有历史草稿时生成前显式确认，
     // 避免「只是想刷新看看」的用户在不知情下多出一份草稿。
     if (draftHistory.length > 0 &&
@@ -271,6 +293,7 @@ export function ResumePage({ onNavigate }: { onNavigate?: (page: string) => void
     setLoading(true);
     try {
       const newDraft = await api.createResumeDraft(Number(jobId));
+      if (!activeRef.current || version !== selectionVersion.current) return;
       setDraft(newDraft);
       setBlockNotice(null);
       setReviewMode(false);
@@ -279,6 +302,7 @@ export function ResumePage({ onNavigate }: { onNavigate?: (page: string) => void
       void refreshDraftHistory(jobId);
       toast.success("已生成简历草稿");
     } catch (error) {
+      if (!activeRef.current || version !== selectionVersion.current) return;
       const message = error instanceof Error ? error.message : "生成失败";
       // P0-2：硬性门槛阻断不再是几秒即逝的 toast + 死胡同空态，
       // 转为页面内常驻提示并给出「去岗位库」出口。
@@ -286,32 +310,45 @@ export function ResumePage({ onNavigate }: { onNavigate?: (page: string) => void
       setBlockNotice(notice);
       if (!notice) toast.error(message);
     } finally {
-      setLoading(false);
+      if (activeRef.current) setLoading(false);
     }
   }
 
   async function saveDraft(): Promise<boolean> {
-    if (!draft) return false;
-    try {
-      const payload = await api.updateResumeDraft(draft.id, draft.sections);
-      setDraft(payload);
-      setSaved(true);
-      window.setTimeout(() => setSaved(false), 1500);
-      void refreshDraftHistory(jobId);
-      return true;
-    } catch (error) {
-      // 保存失败不丢内容：本地编辑保留在 state 中，仅提示失败原因。
-      toast.error(error instanceof Error ? `${error.message}（已编辑内容已保留，可重试保存）` : "保存失败，已编辑内容已保留，可重试保存");
-      return false;
-    }
+    const snapshot = draftRef.current;
+    if (!snapshot) return false;
+    const run = savingQueue.current.then(async () => {
+      if (!activeRef.current || getToken() !== ownerToken.current) return false;
+      try {
+        const payload = await api.updateResumeDraft(snapshot.id, snapshot.sections);
+        if (!activeRef.current) return false;
+        // An older save may finish after the user has edited or opened another
+        // draft. Persist it without replacing that newer editor state.
+        const matchesSnapshot = (current: ResumeDraft | null) => current?.id === snapshot.id
+          && (current.sections === snapshot.sections || JSON.stringify(current.sections) === JSON.stringify(snapshot.sections));
+        const stillCurrent = matchesSnapshot(draftRef.current);
+        setDraft((current) => matchesSnapshot(current) ? payload : current);
+        setSaved(stillCurrent);
+        window.setTimeout(() => setSaved(false), 1500);
+        if (jobIdRef.current === snapshot.job_id) void refreshDraftHistory(snapshot.job_id);
+        return stillCurrent;
+      } catch (error) {
+        toast.error(error instanceof Error ? `${error.message}（已编辑内容已保留，可重试保存）` : "保存失败，已编辑内容已保留，可重试保存");
+        return false;
+      }
+    });
+    savingQueue.current = run;
+    return run;
   }
 
   function handleJobSelect(next: number) {
+    if (exportingRef.current) return;
     if (next === jobId) return;
     if (shouldResetDraftOnJobChange(next, draft) &&
         !window.confirm("当前显示的是其他岗位的草稿，切换后将清除显示（历史版本仍可从「历史版本」恢复），确定切换吗？")) {
       return;
     }
+    selectionVersion.current += 1;
     setJobId(next);
     setDraft(null);
     setReviewMode(false);
@@ -320,8 +357,11 @@ export function ResumePage({ onNavigate }: { onNavigate?: (page: string) => void
   }
 
   async function loadHistoricalDraft(draftId: number) {
+    if (exportingRef.current) return;
+    const version = ++selectionVersion.current;
     try {
       const loaded = await api.getResumeDraft(draftId);
+      if (!activeRef.current || version !== selectionVersion.current) return;
       setDraft(loaded);
       setReviewMode(false);
       setCurrentIndex(0);
@@ -350,21 +390,24 @@ export function ResumePage({ onNavigate }: { onNavigate?: (page: string) => void
   }
 
   async function doExport(format: "docx" | "pdf", mode: "application" | "diagnostic", override: boolean) {
-    if (!draft) return;
+    if (!draft || exportingRef.current) return;
+    exportingRef.current = true;
     setExporting(true);
     setExportConfirm(null);
     try {
       const savedOk = await saveDraft();
       if (!savedOk) {
-        toast.info("导出已中止：草稿保存失败，请先重试保存");
+        toast.info("导出已中止：草稿有新修改或保存失败，请确认内容后重试保存");
         return;
       }
       const { blob, filename } = await api.exportResume(draft.id, format, mode, override);
+      if (!activeRef.current) return;
       downloadBlob(blob, filename ?? `resume-${draft.id}-${mode}.${format}`);
       toast.success(`已导出 ${format.toUpperCase()}`);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "导出失败");
     } finally {
+      exportingRef.current = false;
       setExporting(false);
     }
   }
@@ -386,6 +429,7 @@ export function ResumePage({ onNavigate }: { onNavigate?: (page: string) => void
   }
 
   function updateSectionTitle(index: number, value: string) {
+    if (exportingRef.current) return;
     setDraft((current) => {
       if (!current) return current;
       const sections = [...current.sections];
@@ -395,6 +439,7 @@ export function ResumePage({ onNavigate }: { onNavigate?: (page: string) => void
   }
 
   function updateItem(sectionIndex: number, itemIndex: number, value: string) {
+    if (exportingRef.current) return;
     setDraft((current) => {
       if (!current) return current;
       const sections: ResumeSection[] = current.sections.map((section, index) => {
@@ -425,6 +470,7 @@ export function ResumePage({ onNavigate }: { onNavigate?: (page: string) => void
   }
 
   function setDecision(sectionId: string, itemIndex: number, decision: "adopt" | "edit" | "remove") {
+    if (exportingRef.current) return;
     setDraft((current) => {
       if (!current) return current;
       const sections = current.sections.map((section) => {
@@ -443,6 +489,7 @@ export function ResumePage({ onNavigate }: { onNavigate?: (page: string) => void
   }
 
   function updateReviewText(sectionId: string, itemIndex: number, value: string) {
+    if (exportingRef.current) return;
     setDraft((current) => {
       if (!current) return current;
       const sections = current.sections.map((section) => {
@@ -477,8 +524,7 @@ export function ResumePage({ onNavigate }: { onNavigate?: (page: string) => void
       return;
     }
     try {
-      const payload = await api.updateResumeDraft(draft.id, draft.sections);
-      setDraft(payload);
+      if (!await saveDraft()) return;
       setReviewMode(false);
       setEditing(false);
       void refreshDraftHistory(jobId);
@@ -538,7 +584,7 @@ export function ResumePage({ onNavigate }: { onNavigate?: (page: string) => void
         <div className="generator-row">
           <label>
             <span>目标岗位</span>
-            <select value={jobId} onChange={(event) => handleJobSelect(Number(event.target.value))}>
+            <select value={jobId} onChange={(event) => handleJobSelect(Number(event.target.value))} disabled={loading || exporting}>
               {jobsLoading ? (
                 <option value="">加载中…</option>
               ) : jobs.length === 0 ? (
@@ -553,7 +599,7 @@ export function ResumePage({ onNavigate }: { onNavigate?: (page: string) => void
             </select>
           </label>
           {/* Task C: 生成是本页主 CTA */}
-          <button className="primary-button" onClick={generate} disabled={loading || !jobId || jobsLoading}>
+          <button className="primary-button" onClick={generate} disabled={loading || exporting || !jobId || jobsLoading}>
             {loading ? <ButtonSpinner /> : <WandSparkles size={17} />}
             生成
           </button>
@@ -584,6 +630,7 @@ export function ResumePage({ onNavigate }: { onNavigate?: (page: string) => void
                 key={item.id}
                 className={`history-item${draft?.id === item.id ? " history-item-active" : ""}`}
                 onClick={() => void loadHistoricalDraft(item.id)}
+                disabled={loading || exporting}
               >
                 <span className="history-item-title">
                   <strong>#{item.id}</strong> {item.title}
@@ -635,7 +682,7 @@ export function ResumePage({ onNavigate }: { onNavigate?: (page: string) => void
                     分步审阅
                   </button>
                 )}
-                <button className="secondary-button" onClick={saveDraft}>
+                <button className="secondary-button" onClick={saveDraft} disabled={exporting}>
                   <Save size={17} />
                   {saved ? "已保存" : "保存"}
                 </button>
@@ -775,9 +822,9 @@ export function ResumePage({ onNavigate }: { onNavigate?: (page: string) => void
               <div className="section-editor-list stagger-children">
                 {draft.sections.map((section, sectionIndex) => (
                   <div className="section-editor" key={section.id}>
-                    <input className="section-title-input" value={section.title} onChange={(event) => updateSectionTitle(sectionIndex, event.target.value)} />
+                    <input className="section-title-input" value={section.title} onChange={(event) => updateSectionTitle(sectionIndex, event.target.value)} disabled={exporting} />
                     {section.items.map((item, itemIndex) => (
-                      <textarea key={`${section.id}-${itemIndex}`} value={item.text} onChange={(event) => updateItem(sectionIndex, itemIndex, event.target.value)} />
+                      <textarea key={`${section.id}-${itemIndex}`} value={item.text} onChange={(event) => updateItem(sectionIndex, itemIndex, event.target.value)} disabled={exporting} />
                     ))}
                   </div>
                 ))}
